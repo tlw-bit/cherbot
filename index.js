@@ -1,0 +1,339 @@
+const fs = require("fs");
+const path = require("path");
+const { Client, GatewayIntentBits, EmbedBuilder } = require("discord.js");
+const config = require("./config.json");
+
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMembers
+  ]
+});
+
+client.once("ready", () => {
+  console.log(`✅ Logged in as ${client.user.tag}`);
+});
+
+
+const DATA_FILE = path.join(__dirname, "data.json");
+
+function loadData() {
+  if (!fs.existsSync(DATA_FILE)) return { users: {}, selfRoles: [] };
+  try {
+    return JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+  } catch {
+    return { users: {}, selfRoles: [] };
+  }
+}
+
+function saveData(data) {
+  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), "utf8");
+}
+
+function randInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function xpNeeded(level) {
+  return 100 + (level - 1) * 50;
+}
+
+function ensureUser(data, userId) {
+  if (!data.users[userId]) data.users[userId] = { xp: 0, level: 1, lastXpAt: 0 };
+  return data.users[userId];
+}
+
+function getLogChannel(guild) {
+  const id = config.logChannelId;
+  if (!id) return null;
+  return guild.channels.cache.get(id) || null;
+}
+
+function logEmbed(guild, embed) {
+  const ch = getLogChannel(guild);
+  if (!ch) return;
+  ch.send({ embeds: [embed] }).catch(() => {});
+}
+
+async function announceLevelUp(guild, fallbackChannel, user, newLevel) {
+  const embed = new EmbedBuilder()
+    .setTitle("✨ Level Up!")
+    .setDescription(`${user} reached **Level ${newLevel}**`)
+    .setTimestamp();
+
+  const levelUpId = config.levelUpChannelId;
+  if (levelUpId) {
+    const ch = guild.channels.cache.get(levelUpId);
+    if (ch) return ch.send({ embeds: [embed] }).catch(() => {});
+  }
+  return fallbackChannel.send({ embeds: [embed] }).catch(() => {});
+}
+
+function getLevelRoleIdsSorted() {
+  const map = config.levelRoles || {};
+  return Object.entries(map)
+    .map(([lvl, roleId]) => ({ lvl: Number(lvl), roleId }))
+    .filter(x => Number.isFinite(x.lvl) && typeof x.roleId === "string" && x.roleId.length > 0)
+    .sort((a, b) => a.lvl - b.lvl);
+}
+
+function cringeLevelUpLine(level, userMention) {
+  const lines = {
+    2:  `🚧 ${userMention} unlocked **Pool’s Closed**. Lifeguard is imaginary.`,
+    5:  `🪑 ${userMention} is now **Chair Rotator (PRO)**. Spin responsibly.`,
+    8:  `🧢 ${userMention} achieved **Fake HC Member**. Badge? Never heard of it.`,
+    12: `🧃 ${userMention} unlocked **HC Member (Trust Me)**. Source: “trust me”.`,
+    16: `🪙 🚨 WARNING: ${userMention} has reached **Coin Beggar** status.`,
+    20: `🚪 ${userMention} promoted to **Club NX Bouncer**. Pay: exposure.`,
+    25: `🕺 DANGER: ${userMention} is now a **Dancefloor Menace**. Everyone in radius is at risk.`,
+    30: `🪙 ${userMention} is now **Definitely Legit**. Nothing to see here.`,
+    40: `🌱 INTERVENTION: ${userMention} unlocked **Touch Grass Challenge Failed**.`,
+    50: `🏨 FINAL FORM: ${userMention} became **Hotel Legend (Unemployed)**. The hotel owns you now.`
+  };
+
+  // Fallback for levels you don't have a custom line for
+  return lines[level] || `✨ ${userMention} leveled up to **Level ${level}**.`;
+}
+
+async function announceLevelUp(guild, fallbackChannel, user, newLevel) {
+  const userMention = `<@${user.id}>`;
+  const line = cringeLevelUpLine(newLevel, userMention);
+
+  // 1) Post cringe message to level-up channel (or fallback channel)
+  const levelUpId = config.levelUpChannelId;
+  let postedChannel = null;
+
+  if (levelUpId) {
+    const ch = guild.channels.cache.get(levelUpId);
+    if (ch) {
+      postedChannel = ch;
+      await ch.send({ content: line }).catch(() => {});
+    }
+  }
+
+  if (!postedChannel) {
+    postedChannel = fallbackChannel;
+    await fallbackChannel.send({ content: line }).catch(() => {});
+  }
+
+  // 2) Log embed to modlog (logChannelId)
+  if (config.logChannelId) {
+    const embed = new EmbedBuilder()
+      .setTitle("✨ Level Up")
+      .setDescription(line)
+      .addFields({ name: "Level", value: String(newLevel), inline: true })
+      .setTimestamp();
+
+    logEmbed(guild, embed);
+  }
+}
+// ===== Join/Leave Logs =====
+client.on("guildMemberAdd", (member) => {
+  const embed = new EmbedBuilder()
+    .setTitle("✅ Member Joined")
+    .setColor(0x57F287)
+    .setDescription(`<@${member.user.id}> joined the server.`)
+    .addFields(
+      { name: "User", value: member.user.tag, inline: true },
+      { name: "ID", value: member.user.id, inline: true }
+    )
+    .setTimestamp();
+
+  logEmbed(member.guild, embed);
+});
+
+client.on("guildMemberRemove", (member) => {
+  const embed = new EmbedBuilder()
+    .setTitle("🚪 Member Left")
+    .setColor(0xED4245)
+    .setDescription(`<@${member.user.id}> left the server.`)
+    .addFields(
+      { name: "User", value: member.user.tag, inline: true },
+      { name: "ID", value: member.user.id, inline: true }
+    )
+    .setTimestamp();
+
+  logEmbed(member.guild, embed);
+});
+
+// ===== Slash commands + Button interactions =====
+client.on("interactionCreate", async (interaction) => {
+  // Button role toggles
+  if (interaction.isButton()) {
+    const id = interaction.customId;
+    if (!id.startsWith("selfrole:")) return;
+
+    const roleId = id.split(":")[1];
+    if (!data.selfRoles.includes(roleId)) {
+      return interaction.reply({ content: "❌ That role is no longer self-assignable.", ephemeral: true });
+    }
+
+    const role = interaction.guild.roles.cache.get(roleId);
+    if (!role) return interaction.reply({ content: "❌ Role not found.", ephemeral: true });
+
+    const me = interaction.guild.members.me;
+    if (!me?.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
+      return interaction.reply({ content: "❌ I need **Manage Roles** permission.", ephemeral: true });
+    }
+
+    const member = await interaction.guild.members.fetch(interaction.user.id);
+
+    const already = member.roles.cache.has(roleId);
+    try {
+      if (already) {
+        await member.roles.remove(role);
+        interaction.reply({ content: `Removed ${role} from you.`, ephemeral: true });
+      } else {
+        await member.roles.add(role);
+        interaction.reply({ content: `Added ${role} to you.`, ephemeral: true });
+      }
+
+      const embed = new EmbedBuilder()
+        .setTitle("🎭 Role Toggle")
+        .setDescription(`${interaction.user} ${already ? "removed" : "added"} ${role}`)
+        .setTimestamp();
+      logEmbed(interaction.guild, embed);
+    } catch {
+      interaction.reply({ content: "❌ I couldn’t change that role. Check my role position.", ephemeral: true });
+    }
+    return;
+  }
+
+  // Slash commands
+  if (!interaction.isChatInputCommand()) return;
+
+  if (interaction.commandName === "level") {
+    const target = interaction.options.getUser("user") || interaction.user;
+    const u = ensureUser(data, target.id);
+
+    const embed = new EmbedBuilder()
+      .setTitle("📈 Level")
+      .addFields(
+        { name: "User", value: `${target}`, inline: true },
+        { name: "Level", value: `${u.level}`, inline: true },
+        { name: "XP", value: `${u.xp} / ${xpNeeded(u.level)}`, inline: true }
+      )
+      .setTimestamp();
+
+    return interaction.reply({ embeds: [embed] });
+  }
+
+  if (interaction.commandName === "leaderboard") {
+    const entries = Object.entries(data.users)
+      .map(([id, u]) => ({ id, level: u.level, xp: u.xp }))
+      .sort((a, b) => (b.level - a.level) || (b.xp - a.xp))
+      .slice(0, 10);
+
+    const lines = await Promise.all(entries.map(async (e, i) => {
+      const user = await client.users.fetch(e.id).catch(() => null);
+      const name = user ? user.tag : e.id;
+      return `**${i + 1}.** ${name} — Level **${e.level}** (${e.xp} XP)`;
+    }));
+
+    const embed = new EmbedBuilder()
+      .setTitle("🏆 Leaderboard")
+      .setDescription(lines.join("\n") || "No data yet.")
+      .setTimestamp();
+
+    return interaction.reply({ embeds: [embed] });
+  }
+
+  if (interaction.commandName === "roleadmin") {
+    const sub = interaction.options.getSubcommand();
+
+    if (sub === "list") {
+      const roles = data.selfRoles
+        .map(id => interaction.guild.roles.cache.get(id))
+        .filter(Boolean)
+        .map(r => `${r}`);
+
+      return interaction.reply({
+        content: roles.length ? `Allowed roles:\n${roles.join("\n")}` : "No self-assignable roles set yet.",
+        ephemeral: true
+      });
+    }
+
+    const role = interaction.options.getRole("role");
+    if (!role) return interaction.reply({ content: "Role missing.", ephemeral: true });
+
+    if (sub === "allow") {
+      if (!data.selfRoles.includes(role.id)) data.selfRoles.push(role.id);
+      saveData(data);
+
+      const embed = new EmbedBuilder()
+        .setTitle("✅ Role Allowed")
+        .setDescription(`${interaction.user} allowed ${role} for self-assign`)
+        .setTimestamp();
+      logEmbed(interaction.guild, embed);
+
+      return interaction.reply({ content: `✅ Allowed ${role} to be self-assigned.`, ephemeral: true });
+    }
+
+    if (sub === "disallow") {
+      data.selfRoles = data.selfRoles.filter(id => id !== role.id);
+      saveData(data);
+
+      const embed = new EmbedBuilder()
+        .setTitle("🛑 Role Disallowed")
+        .setDescription(`${interaction.user} disallowed ${role}`)
+        .setTimestamp();
+      logEmbed(interaction.guild, embed);
+
+      return interaction.reply({ content: `✅ Disallowed ${role}.`, ephemeral: true });
+    }
+  }
+
+  if (interaction.commandName === "role") {
+    const sub = interaction.options.getSubcommand();
+    const role = interaction.options.getRole("role");
+
+    if (!data.selfRoles.includes(role.id)) {
+      return interaction.reply({ content: "❌ That role is not self-assignable.", ephemeral: true });
+    }
+
+    const me = interaction.guild.members.me;
+    if (!me?.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
+      return interaction.reply({ content: "❌ I need the Manage Roles permission.", ephemeral: true });
+    }
+
+    const member = await interaction.guild.members.fetch(interaction.user.id);
+
+    try {
+      if (sub === "add") {
+        await member.roles.add(role);
+        return interaction.reply({ content: `✅ Added ${role} to you.`, ephemeral: true });
+      }
+
+      if (sub === "remove") {
+        await member.roles.remove(role);
+        return interaction.reply({ content: `✅ Removed ${role} from you.`, ephemeral: true });
+      }
+    } catch {
+      return interaction.reply({ content: "❌ I couldn’t change that role. Check my role position.", ephemeral: true });
+    }
+  }
+
+  if (interaction.commandName === "rolemenu") {
+    const title = interaction.options.getString("title") || "Pick your roles";
+    const desc = interaction.options.getString("description") || "Click a button to toggle a role.";
+
+    const allowed = data.selfRoles.slice();
+    const rows = buildRoleMenuComponents(interaction.guild, allowed);
+
+    if (!rows.length) {
+      return interaction.reply({ content: "No allowed roles yet. Use `/roleadmin allow` first.", ephemeral: true });
+    }
+
+    const embed = new EmbedBuilder()
+      .setTitle(title)
+      .setDescription(desc)
+      .setTimestamp();
+
+    await interaction.channel.send({ embeds: [embed], components: rows });
+    return interaction.reply({ content: "✅ Role menu posted.", ephemeral: true });
+  }
+});
+
+client.login(process.env.DISCORD_TOKEN).catch(console.error);
