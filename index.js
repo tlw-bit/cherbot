@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { Client, GatewayIntentBits, EmbedBuilder } = require("discord.js");
+const { Client, GatewayIntentBits, EmbedBuilder, PermissionsBitField } = require("discord.js");
 const config = require("./config.json");
 
 const client = new Client({
@@ -11,6 +11,19 @@ const client = new Client({
     GatewayIntentBits.GuildMembers
   ]
 });
+client.on("messageCreate", async (message) => {
+  if (message.author.bot) return;
+
+  // prefix
+  if (!message.content.startsWith("!")) return;
+
+  const cmd = message.content.slice(1).trim().toLowerCase();
+
+  if (cmd === "getcode") {
+    // TODO: replace this with your real code generator logic
+    return message.reply("✅ Here’s your code: **verify-ABC123**");
+  }
+});
 
 client.once("ready", () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
@@ -18,6 +31,7 @@ client.once("ready", () => {
 
 
 const DATA_FILE = path.join(__dirname, "data.json");
+let data = loadData();
 
 function loadData() {
   if (!fs.existsSync(DATA_FILE)) return { users: {}, selfRoles: [] };
@@ -159,11 +173,26 @@ client.on("guildMemberRemove", (member) => {
 });
 
 // ===== Slash commands + Button interactions =====
-client.on("interactionCreate", async (interaction) => {
-  // Button role toggles
-  if (interaction.isButton()) {
-    const id = interaction.customId;
-    if (!id.startsWith("selfrole:")) return;
+  client.on("interactionCreate", async (interaction) => {
+  try {
+    // Button role toggles...
+    // (keep your existing button code)
+
+    // Slash commands
+    if (!interaction.isChatInputCommand()) return;
+
+    // For commands that might take time, ACK immediately:
+   if (interaction.commandName === "leaderboard") {
+  await interaction.deferReply(); // ACK
+
+  // ... build embed ...
+
+  return interaction.editReply({ embeds: [embed] });
+}
+
+    }
+
+    // then for those commands use editReply instead of reply
 
     const roleId = id.split(":")[1];
     if (!data.selfRoles.includes(roleId)) {
@@ -337,3 +366,4 @@ client.on("interactionCreate", async (interaction) => {
 });
 
 client.login(process.env.DISCORD_TOKEN).catch(console.error);
+
