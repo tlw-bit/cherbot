@@ -1,5 +1,28 @@
 const { REST, Routes, SlashCommandBuilder, PermissionFlagsBits } = require("discord.js");
 const config = require("./config.json");
+{
+  name: "stats",
+  description: "View a user's XP and level (mods only)",
+  options: [
+    { name: "user", description: "User to inspect", type: 6, required: true }
+  ]
+},
+{
+  name: "xpreset",
+  description: "Reset or set a user's XP/level (mods only)",
+  options: [
+    { name: "user", description: "User to reset", type: 6, required: true },
+    { name: "level", description: "Level to set (default: 1)", type: 4, required: false }
+  ]
+},
+{
+  name: "givexp",
+  description: "Give or remove XP from a user (mods only)",
+  options: [
+    { name: "user", description: "User to modify", type: 6, required: true },
+    { name: "amount", description: "XP amount (can be negative)", type: 4, required: true }
+  ]
+}
 
 const commands = [
   new SlashCommandBuilder()
@@ -74,3 +97,4 @@ const rest = new REST({ version: "10" }).setToken(config.token);
     console.error(err);
   }
 })();
+
