@@ -280,7 +280,34 @@ client.on("interactionCreate", async (interaction) => {
         });
       } catch {
         return interaction.reply({ content: "❌ I couldn’t change that role. Check my role position.", ephemeral: true });
-      }
+      } 
+      if (interaction.commandName === "stats") {
+  if (!interaction.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
+    return interaction.reply({ content: "❌ Mods only.", ephemeral: true });
+  }
+
+  const target = interaction.options.getUser("user");
+  if (!target) {
+    return interaction.reply({ content: "User required.", ephemeral: true });
+  }
+
+  const u = ensureUser(target.id);
+  const lastXp = u.lastXpAt
+    ? `<t:${Math.floor(u.lastXpAt / 1000)}:R>`
+    : "Never";
+
+  const embed = new EmbedBuilder()
+    .setTitle("📊 User Stats")
+    .addFields(
+      { name: "User", value: `${target}`, inline: true },
+      { name: "Level", value: String(u.level), inline: true },
+      { name: "XP", value: `${u.xp} / ${xpNeeded(u.level)}`, inline: true },
+      { name: "Last XP Gain", value: lastXp, inline: false }
+    )
+    .setTimestamp();
+
+  return interaction.reply({ embeds: [embed], ephemeral: true });
+}
     }
 
     // Slash commands
@@ -428,3 +455,4 @@ client.on("interactionCreate", async (interaction) => {
 
 // -------------------- Login --------------------
 client.login(process.env.DISCORD_TOKEN).catch(console.error);
+
