@@ -1,100 +1,133 @@
+// deploy-commands.js
+// Registers slash commands for Cherbot
+
 const { REST, Routes, SlashCommandBuilder, PermissionFlagsBits } = require("discord.js");
 const config = require("./config.json");
-{
-  name: "stats",
-  description: "View a user's XP and level (mods only)",
-  options: [
-    { name: "user", description: "User to inspect", type: 6, required: true }
-  ]
-},
-{
-  name: "xpreset",
-  description: "Reset or set a user's XP/level (mods only)",
-  options: [
-    { name: "user", description: "User to reset", type: 6, required: true },
-    { name: "level", description: "Level to set (default: 1)", type: 4, required: false }
-  ]
-},
-{
-  name: "givexp",
-  description: "Give or remove XP from a user (mods only)",
-  options: [
-    { name: "user", description: "User to modify", type: 6, required: true },
-    { name: "amount", description: "XP amount (can be negative)", type: 4, required: true }
-  ]
+
+// Token: from env first, fallback to config.json
+const token = process.env.DISCORD_TOKEN || config.token;
+if (!token) {
+  console.error("❌ No token found. Set DISCORD_TOKEN or add token to config.json");
+  process.exit(1);
 }
 
+const clientId = config.clientId; // Cherbot application ID
+const guildId = config.guildId;   // Your server ID (guild)
+
+if (!clientId || !guildId) {
+  console.error("❌ clientId or guildId missing in config.json");
+  process.exit(1);
+}
+
+// -------------------- Command definitions --------------------
 const commands = [
   new SlashCommandBuilder()
     .setName("level")
-    .setDescription("View your level (or someone else's).")
-    .addUserOption(opt => opt.setName("user").setDescription("User to check").setRequired(false)),
+    .setDescription("View your level or another user's level")
+    .addUserOption(opt =>
+      opt.setName("user").setDescription("User to check").setRequired(false)
+    ),
 
   new SlashCommandBuilder()
     .setName("leaderboard")
-    .setDescription("Shows the top 10 users by level/XP."),
+    .setDescription("View the XP leaderboard"),
+
+  new SlashCommandBuilder()
+    .setName("stats")
+    .setDescription("View a user's XP and level (mods only)")
+    .addUserOption(opt =>
+      opt.setName("user").setDescription("User to inspect").setRequired(true)
+    )
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+
+  new SlashCommandBuilder()
+    .setName("xpreset")
+    .setDescription("Reset or set a user's XP/level (mods only)")
+    .addUserOption(opt =>
+      opt.setName("user").setDescription("User to reset").setRequired(true)
+    )
+    .addIntegerOption(opt =>
+      opt.setName("level").setDescription("Level to set (default: 1)").setRequired(false)
+    )
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+
+  new SlashCommandBuilder()
+    .setName("givexp")
+    .setDescription("Give or remove XP from a user (mods only)")
+    .addUserOption(opt =>
+      opt.setName("user").setDescription("User to modify").setRequired(true)
+    )
+    .addIntegerOption(opt =>
+      opt.setName("amount").setDescription("XP amount (can be negative)").setRequired(true)
+    )
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 
   new SlashCommandBuilder()
     .setName("role")
-    .setDescription("Self-assign roles")
+    .setDescription("Add or remove a self-assignable role")
     .addSubcommand(sub =>
       sub.setName("add")
-        .setDescription("Add a self-assignable role")
-        .addRoleOption(opt => opt.setName("role").setDescription("Role").setRequired(true))
+        .setDescription("Add a role")
+        .addRoleOption(opt =>
+          opt.setName("role").setDescription("Role").setRequired(true)
+        )
     )
     .addSubcommand(sub =>
       sub.setName("remove")
-        .setDescription("Remove a self-assignable role")
-        .addRoleOption(opt => opt.setName("role").setDescription("Role").setRequired(true))
+        .setDescription("Remove a role")
+        .addRoleOption(opt =>
+          opt.setName("role").setDescription("Role").setRequired(true)
+        )
     ),
 
   new SlashCommandBuilder()
     .setName("roleadmin")
-    .setDescription("Admin: manage self-assignable roles list")
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
+    .setDescription("Manage self-assignable roles (mods only)")
     .addSubcommand(sub =>
       sub.setName("allow")
-        .setDescription("Allow a role to be self-assigned")
-        .addRoleOption(opt => opt.setName("role").setDescription("Role").setRequired(true))
+        .setDescription("Allow a role")
+        .addRoleOption(opt =>
+          opt.setName("role").setDescription("Role").setRequired(true)
+        )
     )
     .addSubcommand(sub =>
       sub.setName("disallow")
-        .setDescription("Disallow a role from being self-assigned")
-        .addRoleOption(opt => opt.setName("role").setDescription("Role").setRequired(true))
+        .setDescription("Disallow a role")
+        .addRoleOption(opt =>
+          opt.setName("role").setDescription("Role").setRequired(true)
+        )
     )
     .addSubcommand(sub =>
       sub.setName("list")
-        .setDescription("List allowed self-assignable roles")
-    ),
+        .setDescription("List allowed roles")
+    )
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 
   new SlashCommandBuilder()
     .setName("rolemenu")
-    .setDescription("Admin: post a button role menu for allowed roles")
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
+    .setDescription("Post a self-role button menu")
     .addStringOption(opt =>
-      opt.setName("title")
-        .setDescription("Menu title")
-        .setRequired(false)
+      opt.setName("title").setDescription("Menu title").setRequired(false)
     )
     .addStringOption(opt =>
-      opt.setName("description")
-        .setDescription("Menu description")
-        .setRequired(false)
+      opt.setName("description").setDescription("Menu description").setRequired(false)
     )
-].map(c => c.toJSON());
+];
 
-const rest = new REST({ version: "10" }).setToken(config.token);
+// -------------------- Deploy --------------------
+const rest = new REST({ version: "10" }).setToken(token);
 
 (async () => {
   try {
-    console.log("Deploying slash commands...");
+    console.log("🚀 Deploying slash commands...");
+
     await rest.put(
-      Routes.applicationGuildCommands(config.clientId, config.guildId),
-      { body: commands }
+      Routes.applicationGuildCommands(clientId, guildId),
+      { body: commands.map(cmd => cmd.toJSON()) }
     );
-    console.log("✅ Slash commands deployed.");
-  } catch (err) {
-    console.error(err);
+
+    console.log("✅ Slash commands deployed successfully.");
+  } catch (error) {
+    console.error("❌ Failed to deploy commands:", error);
   }
 })();
-
