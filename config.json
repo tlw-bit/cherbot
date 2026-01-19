@@ -1,21 +1,30 @@
 {
+  "token": "SECRET",
   "guildId": "1456735416156819578",
   "clientId": "1457704762815287350",
+
   "xpMin": 10,
   "xpMax": 20,
   "cooldownSeconds": 60,
-  "levelUpChannelId": "1456967580299559066",
-  "levelRoles": {
-    "2": "1462479094859038773",
-    "5": "1462479797304295535",
-    "8": "1462480092910587925",
-    "12": "1462480383328129075",
-    "16": "1462480684496060728",
-    "20": "1462480917322010715",
-    "25": "1462481138546381127",
-    "30": "1462481539391684760",
-    "40": "1462478268199600129",
-    "50": "1462478548961857844"
-  }
-}
 
+  "logChannelId": "YOUR_LOG_CHANNEL_ID",
+  "levelUpChannelId": "YOUR_LEVELUP_CHANNEL_ID",
+
+  "winnersChannelId": "YOUR_WINNERS_CHANNEL_ID",
+
+  "levelRoles": {
+    "2": "ROLE_ID",
+    "5": "ROLE_ID",
+    "8": "ROLE_ID",
+    "12": "ROLE_ID",
+    "16": "ROLE_ID",
+    "20": "ROLE_ID",
+    "25": "ROLE_ID",
+    "30": "ROLE_ID",
+    "40": "ROLE_ID",
+    "50": "ROLE_ID"
+  },
+
+  "xpAllowedChannelIds": [],
+  "xpBlockedChannelIds": []
+}
