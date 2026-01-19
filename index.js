@@ -564,4 +564,11 @@ client.on("interactionCreate", async (interaction) => {
 });
 
 // -------------------- Login --------------------
-client.login(process.env.DISCORD_TOKEN).catch(console.error);
+const token = (process.env.DISCORD_TOKEN || config.token || "").trim();
+
+if (!token) {
+  console.error("❌ No Discord token found.");
+  process.exit(1);
+}
+
+client.login(token).catch(console.error);
