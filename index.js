@@ -173,24 +173,25 @@ client.on("guildMemberRemove", (member) => {
 });
 
 // ===== Slash commands + Button interactions =====
-  client.on("interactionCreate", async (interaction) => {
+client.on("interactionCreate", async (interaction) => {
   try {
-    // Button role toggles...
-    // (keep your existing button code)
+    // your existing interaction code goes here
+    // (buttons + slash commands)
+  } catch (err) {
+    console.error(err);
 
-    // Slash commands
-    if (!interaction.isChatInputCommand()) return;
-
-    // For commands that might take time, ACK immediately:
-   if (interaction.commandName === "leaderboard") {
-  await interaction.deferReply(); // ACK
-
-  // ... build embed ...
-
-  return interaction.editReply({ embeds: [embed] });
-}
-
+    // prevent Discord "did not respond" if possible
+    if (interaction.isRepliable()) {
+      try {
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({ content: "❌ Something went wrong.", ephemeral: true });
+        } else {
+          await interaction.reply({ content: "❌ Something went wrong.", ephemeral: true });
+        }
+      } catch {}
     }
+  }
+});
 
     // then for those commands use editReply instead of reply
 
@@ -366,4 +367,5 @@ client.on("guildMemberRemove", (member) => {
 });
 
 client.login(process.env.DISCORD_TOKEN).catch(console.error);
+
 
