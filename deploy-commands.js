@@ -5,6 +5,9 @@ const { REST, Routes, SlashCommandBuilder, PermissionFlagsBits } = require("disc
 const config = require("./config.json");
 
 // Token: from env first, fallback to config.json
+console.log("token length:", token.length);
+console.log("token starts:", token.slice(0, 6));
+console.log("token ends:", token.slice(-6));
 const token = String(process.env.DISCORD_TOKEN || config.token || "").trim();
 if (!token) {
   console.error("❌ No token found. Set DISCORD_TOKEN or add token to config.json");
@@ -138,5 +141,6 @@ rest.setToken(token);
     console.error("❌ Failed to deploy commands:", error);
   }
 })();
+
 
 
