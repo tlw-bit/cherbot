@@ -1,6 +1,4 @@
-// index.js (Discord.js v14) — clean all-in-one bot
-// Requires env var: DISCORD_TOKEN
-// Optional config.json values: see template below
+// Cherbot index.js (Discord.js v14) — NO getcode (so it won't clash with Verifier)
 
 const fs = require("fs");
 const path = require("path");
@@ -21,8 +19,8 @@ const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent, // for !getcode + XP on messages
-    GatewayIntentBits.GuildMembers,   // for join/leave logs + role ops
+    GatewayIntentBits.MessageContent, // XP + prefix commands
+    GatewayIntentBits.GuildMembers,   // join/leave logs + role ops
   ],
 });
 
@@ -42,8 +40,8 @@ function loadData() {
   }
 }
 
-function saveData(data) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), "utf8");
+function saveData(obj) {
+  fs.writeFileSync(DATA_FILE, JSON.stringify(obj, null, 2), "utf8");
 }
 
 let data = loadData();
@@ -102,7 +100,6 @@ async function announceLevelUp(guild, fallbackChannel, user, newLevel) {
   const userMention = `<@${user.id}>`;
   const line = cringeLevelUpLine(newLevel, userMention);
 
-  // Post to level-up channel if set, else fallback
   const levelUpId = config.levelUpChannelId;
   let postedChannel = null;
 
@@ -119,7 +116,6 @@ async function announceLevelUp(guild, fallbackChannel, user, newLevel) {
     await fallbackChannel.send({ content: line }).catch(() => {});
   }
 
-  // Log to modlog
   if (config.logChannelId) {
     const embed = new EmbedBuilder()
       .setTitle("✨ Level Up")
@@ -137,47 +133,37 @@ async function applyLevelRoles(member, newLevel) {
   const me = member.guild.members.me;
   if (!me?.permissions.has(PermissionsBitField.Flags.ManageRoles)) return;
 
-  // Find the highest role the user should have
   const eligible = pairs.filter((p) => p.lvl <= newLevel);
   if (!eligible.length) return;
 
   const targetRoleId = eligible[eligible.length - 1].roleId;
-
-  // Add target role if exists
   const targetRole = member.guild.roles.cache.get(targetRoleId);
   if (targetRole) {
     await member.roles.add(targetRole).catch(() => {});
   }
 }
 
-// -------------------- Verification codes --------------------
-const pendingCodes = new Map(); // userId -> { code, expiresAt }
-function makeCode() {
-  return "verify-" + Math.random().toString(36).slice(2, 8).toUpperCase();
-}
-function getOrCreateCode(userId) {
-  const now = Date.now();
-  const existing = pendingCodes.get(userId);
-  if (existing && existing.expiresAt > now) return existing.code;
-
-  const code = makeCode();
-  pendingCodes.set(userId, { code, expiresAt: now + 10 * 60 * 1000 }); // 10 minutes
-  return code;
+// -------------------- Optional: a harmless code command (NOT getcode) --------------------
+function makeToyCode() {
+  return "cher-" + Math.random().toString(36).slice(2, 8).toUpperCase();
 }
 
-// -------------------- Prefix command: !getcode + XP on messages --------------------
+// -------------------- Prefix commands + XP --------------------
 client.on("messageCreate", async (message) => {
   try {
     if (!message.guild) return;
     if (message.author.bot) return;
 
-    // Prefix command
-    if (message.content.trim().toLowerCase() === "!getcode") {
-      const code = getOrCreateCode(message.author.id);
-      return message.reply(`✅ Here’s your code: **${code}** (expires in 10 minutes)`);
+    // Prefix command (optional)
+    if (message.content.trim().toLowerCase() === "!code") {
+      const code = makeToyCode();
+      return message.reply(`🧾 Cherbot code: **${code}**`);
     }
 
-    // XP system (optional)
+    // IMPORTANT: Cherbot must NEVER respond to !getcode
+    if (message.content.trim().toLowerCase() === "!getcode") return;
+
+    // XP system
     const xpMin = Number(config.xpMin ?? 10);
     const xpMax = Number(config.xpMax ?? 20);
     const cooldownSeconds = Number(config.cooldownSeconds ?? 60);
@@ -190,12 +176,10 @@ client.on("messageCreate", async (message) => {
     user.lastXpAt = now;
     user.xp += gained;
 
-    // Level up loop (in case they jump)
     while (user.xp >= xpNeeded(user.level)) {
       user.xp -= xpNeeded(user.level);
       user.level += 1;
 
-      // announce + roles
       await announceLevelUp(message.guild, message.channel, message.author, user.level);
 
       const member = await message.guild.members.fetch(message.author.id).catch(() => null);
@@ -241,7 +225,6 @@ client.on("guildMemberRemove", (member) => {
 
 // -------------------- Self-role menu helpers --------------------
 function buildRoleMenuComponents(guild, roleIds) {
-  // Discord buttons: max 5 rows, 5 buttons each = 25 buttons max
   const roles = roleIds
     .map((id) => guild.roles.cache.get(id))
     .filter(Boolean)
@@ -266,7 +249,7 @@ function buildRoleMenuComponents(guild, roleIds) {
 // -------------------- Slash commands + buttons --------------------
 client.on("interactionCreate", async (interaction) => {
   try {
-    // Button role toggles
+    // Buttons
     if (interaction.isButton()) {
       const id = interaction.customId;
       if (!id.startsWith("selfrole:")) return;
@@ -285,42 +268,31 @@ client.on("interactionCreate", async (interaction) => {
       }
 
       const member = await interaction.guild.members.fetch(interaction.user.id);
-
       const already = member.roles.cache.has(roleId);
-      try {
-        if (already) {
-          await member.roles.remove(role);
-          await interaction.reply({ content: `Removed ${role} from you.`, ephemeral: true });
-        } else {
-          await member.roles.add(role);
-          await interaction.reply({ content: `Added ${role} to you.`, ephemeral: true });
-        }
 
-        if (config.logChannelId) {
-          const embed = new EmbedBuilder()
-            .setTitle("🎭 Role Toggle")
-            .setDescription(`${interaction.user} ${already ? "removed" : "added"} ${role}`)
-            .setTimestamp();
-          logEmbed(interaction.guild, embed);
-        }
+      try {
+        if (already) await member.roles.remove(role);
+        else await member.roles.add(role);
+
+        return interaction.reply({
+          content: `${already ? "Removed" : "Added"} ${role} ${already ? "from" : "to"} you.`,
+          ephemeral: true
+        });
       } catch {
-        await interaction.reply({ content: "❌ I couldn’t change that role. Check my role position.", ephemeral: true });
+        return interaction.reply({ content: "❌ I couldn’t change that role. Check my role position.", ephemeral: true });
       }
-      return;
     }
 
     // Slash commands
     if (!interaction.isChatInputCommand()) return;
 
-    // Prevent "application did not respond" on heavier commands
     if (["leaderboard", "rolemenu"].includes(interaction.commandName)) {
       await interaction.deferReply({ ephemeral: true });
     }
 
+    // IMPORTANT: Cherbot must NEVER respond to /getcode either
     if (interaction.commandName === "getcode") {
-      // quick reply, ephemeral is nicer for codes
-      const code = getOrCreateCode(interaction.user.id);
-      return interaction.reply({ content: `✅ Your code: **${code}** (expires in 10 minutes)`, ephemeral: true });
+      return interaction.reply({ content: "❌ Use the Verifier bot for codes.", ephemeral: true });
     }
 
     if (interaction.commandName === "level") {
@@ -380,30 +352,12 @@ client.on("interactionCreate", async (interaction) => {
       if (sub === "allow") {
         if (!data.selfRoles.includes(role.id)) data.selfRoles.push(role.id);
         saveData(data);
-
-        if (config.logChannelId) {
-          const embed = new EmbedBuilder()
-            .setTitle("✅ Role Allowed")
-            .setDescription(`${interaction.user} allowed ${role} for self-assign`)
-            .setTimestamp();
-          logEmbed(interaction.guild, embed);
-        }
-
         return interaction.reply({ content: `✅ Allowed ${role} to be self-assigned.`, ephemeral: true });
       }
 
       if (sub === "disallow") {
         data.selfRoles = data.selfRoles.filter((id) => id !== role.id);
         saveData(data);
-
-        if (config.logChannelId) {
-          const embed = new EmbedBuilder()
-            .setTitle("🛑 Role Disallowed")
-            .setDescription(`${interaction.user} disallowed ${role}`)
-            .setTimestamp();
-          logEmbed(interaction.guild, embed);
-        }
-
         return interaction.reply({ content: `✅ Disallowed ${role}.`, ephemeral: true });
       }
     }
