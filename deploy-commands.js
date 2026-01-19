@@ -115,7 +115,14 @@ const commands = [
 ];
 
 // -------------------- Deploy --------------------
-const rest = new REST({ version: "10" }).setToken(token);
+// -------------------- Deploy --------------------
+console.log("DISCORD_TOKEN env present?", Boolean(process.env.DISCORD_TOKEN));
+console.log("token variable present?", Boolean(token));
+console.log("clientId:", clientId ? "set" : "missing");
+console.log("guildId:", guildId ? "set" : "missing");
+
+const rest = new REST({ version: "10" });
+rest.setToken(token);
 
 (async () => {
   try {
@@ -131,3 +138,4 @@ const rest = new REST({ version: "10" }).setToken(token);
     console.error("❌ Failed to deploy commands:", error);
   }
 })();
+
