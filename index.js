@@ -1,4 +1,6 @@
-// Cherbot index.js (Discord.js v14) — NO getcode (so it won't clash with Verifier)
+// Cherbot (Discord.js v14) — clean + stable
+// NO getcode (so it won't clash with Verifier)
+// Adds: /stats, /xpreset, /givexp (mods only)
 
 const fs = require("fs");
 const path = require("path");
@@ -19,8 +21,8 @@ const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent, // XP + prefix commands
-    GatewayIntentBits.GuildMembers,   // join/leave logs + role ops
+    GatewayIntentBits.MessageContent, // XP + prefix command
+    GatewayIntentBits.GuildMembers,   // role ops + join/leave logs
   ],
 });
 
@@ -93,6 +95,7 @@ function cringeLevelUpLine(level, userMention) {
     40: `🌱 INTERVENTION: ${userMention} unlocked **Touch Grass Challenge Failed**.`,
     50: `🏨 FINAL FORM: ${userMention} became **Hotel Legend (Unemployed)**. The hotel owns you now.`,
   };
+
   return lines[level] || `✨ ${userMention} leveled up to **Level ${level}**.`;
 }
 
@@ -100,6 +103,7 @@ async function announceLevelUp(guild, fallbackChannel, user, newLevel) {
   const userMention = `<@${user.id}>`;
   const line = cringeLevelUpLine(newLevel, userMention);
 
+  // Post to level-up channel if set, else fallback
   const levelUpId = config.levelUpChannelId;
   let postedChannel = null;
 
@@ -116,6 +120,7 @@ async function announceLevelUp(guild, fallbackChannel, user, newLevel) {
     await fallbackChannel.send({ content: line }).catch(() => {});
   }
 
+  // Log to modlog
   if (config.logChannelId) {
     const embed = new EmbedBuilder()
       .setTitle("✨ Level Up")
@@ -126,14 +131,15 @@ async function announceLevelUp(guild, fallbackChannel, user, newLevel) {
   }
 }
 
-async function applyLevelRoles(member, newLevel) {
+async function applyLevelRoles(member, level) {
   const pairs = getLevelRoleIdsSorted();
   if (!pairs.length) return;
 
   const me = member.guild.members.me;
   if (!me?.permissions.has(PermissionsBitField.Flags.ManageRoles)) return;
 
-  const eligible = pairs.filter((p) => p.lvl <= newLevel);
+  // Find highest eligible level role
+  const eligible = pairs.filter((p) => p.lvl <= level);
   if (!eligible.length) return;
 
   const targetRoleId = eligible[eligible.length - 1].roleId;
@@ -143,7 +149,44 @@ async function applyLevelRoles(member, newLevel) {
   }
 }
 
-// -------------------- Optional: a harmless code command (NOT getcode) --------------------
+// Removes *all* configured level roles
+async function removeAllLevelRoles(member) {
+  const pairs = getLevelRoleIdsSorted();
+  if (!pairs.length) return;
+
+  const me = member.guild.members.me;
+  if (!me?.permissions.has(PermissionsBitField.Flags.ManageRoles)) return;
+
+  for (const { roleId } of pairs) {
+    if (member.roles.cache.has(roleId)) {
+      await member.roles.remove(roleId).catch(() => {});
+    }
+  }
+}
+
+// Level up logic used for XP gain
+async function processLevelUps({ guild, channel, userObj, userDiscord, member }) {
+  let leveledTo = null;
+
+  while (userObj.xp >= xpNeeded(userObj.level)) {
+    userObj.xp -= xpNeeded(userObj.level);
+    userObj.level += 1;
+    leveledTo = userObj.level;
+
+    // Announce (normal leveling only)
+    if (guild && channel && userDiscord) {
+      await announceLevelUp(guild, channel, userDiscord, userObj.level);
+    }
+
+    if (member) {
+      await applyLevelRoles(member, userObj.level);
+    }
+  }
+
+  return leveledTo; // null if no level up
+}
+
+// -------------------- Optional harmless prefix command --------------------
 function makeToyCode() {
   return "cher-" + Math.random().toString(36).slice(2, 8).toUpperCase();
 }
@@ -154,10 +197,9 @@ client.on("messageCreate", async (message) => {
     if (!message.guild) return;
     if (message.author.bot) return;
 
-    // Prefix command (optional)
+    // Optional prefix command
     if (message.content.trim().toLowerCase() === "!code") {
-      const code = makeToyCode();
-      return message.reply(`🧾 Cherbot code: **${code}**`);
+      return message.reply(`🧾 Cherbot code: **${makeToyCode()}**`);
     }
 
     // IMPORTANT: Cherbot must NEVER respond to !getcode
@@ -168,23 +210,23 @@ client.on("messageCreate", async (message) => {
     const xpMax = Number(config.xpMax ?? 20);
     const cooldownSeconds = Number(config.cooldownSeconds ?? 60);
 
-    const user = ensureUser(message.author.id);
+    const userObj = ensureUser(message.author.id);
     const now = Date.now();
-    if (now - (user.lastXpAt || 0) < cooldownSeconds * 1000) return;
+    if (now - (userObj.lastXpAt || 0) < cooldownSeconds * 1000) return;
 
     const gained = randInt(xpMin, xpMax);
-    user.lastXpAt = now;
-    user.xp += gained;
+    userObj.lastXpAt = now;
+    userObj.xp += gained;
 
-    while (user.xp >= xpNeeded(user.level)) {
-      user.xp -= xpNeeded(user.level);
-      user.level += 1;
+    const member = await message.guild.members.fetch(message.author.id).catch(() => null);
 
-      await announceLevelUp(message.guild, message.channel, message.author, user.level);
-
-      const member = await message.guild.members.fetch(message.author.id).catch(() => null);
-      if (member) await applyLevelRoles(member, user.level);
-    }
+    await processLevelUps({
+      guild: message.guild,
+      channel: message.channel,
+      userObj,
+      userDiscord: message.author,
+      member,
+    });
 
     saveData(data);
   } catch (err) {
@@ -246,10 +288,10 @@ function buildRoleMenuComponents(guild, roleIds) {
   return rows;
 }
 
-// -------------------- Slash commands + buttons --------------------
+// -------------------- Interactions (buttons + slash commands) --------------------
 client.on("interactionCreate", async (interaction) => {
   try {
-    // Buttons
+    // -------- Buttons (self roles) --------
     if (interaction.isButton()) {
       const id = interaction.customId;
       if (!id.startsWith("selfrole:")) return;
@@ -274,54 +316,124 @@ client.on("interactionCreate", async (interaction) => {
         if (already) await member.roles.remove(role);
         else await member.roles.add(role);
 
+        if (config.logChannelId) {
+          const embed = new EmbedBuilder()
+            .setTitle("🎭 Role Toggle")
+            .setDescription(`${interaction.user} ${already ? "removed" : "added"} ${role}`)
+            .setTimestamp();
+          logEmbed(interaction.guild, embed);
+        }
+
         return interaction.reply({
           content: `${already ? "Removed" : "Added"} ${role} ${already ? "from" : "to"} you.`,
           ephemeral: true
         });
       } catch {
         return interaction.reply({ content: "❌ I couldn’t change that role. Check my role position.", ephemeral: true });
-      } 
-      if (interaction.commandName === "stats") {
-  if (!interaction.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
-    return interaction.reply({ content: "❌ Mods only.", ephemeral: true });
-  }
-
-  const target = interaction.options.getUser("user");
-  if (!target) {
-    return interaction.reply({ content: "User required.", ephemeral: true });
-  }
-
-  const u = ensureUser(target.id);
-  const lastXp = u.lastXpAt
-    ? `<t:${Math.floor(u.lastXpAt / 1000)}:R>`
-    : "Never";
-
-  const embed = new EmbedBuilder()
-    .setTitle("📊 User Stats")
-    .addFields(
-      { name: "User", value: `${target}`, inline: true },
-      { name: "Level", value: String(u.level), inline: true },
-      { name: "XP", value: `${u.xp} / ${xpNeeded(u.level)}`, inline: true },
-      { name: "Last XP Gain", value: lastXp, inline: false }
-    )
-    .setTimestamp();
-
-  return interaction.reply({ embeds: [embed], ephemeral: true });
-}
+      }
     }
 
-    // Slash commands
+    // -------- Slash Commands --------
     if (!interaction.isChatInputCommand()) return;
 
+    // Defer only the slower ones
     if (["leaderboard", "rolemenu"].includes(interaction.commandName)) {
       await interaction.deferReply({ ephemeral: true });
     }
 
-    // IMPORTANT: Cherbot must NEVER respond to /getcode either
+    // Cherbot must never be your verifier
     if (interaction.commandName === "getcode") {
       return interaction.reply({ content: "❌ Use the Verifier bot for codes.", ephemeral: true });
     }
 
+    // ---------- MOD COMMANDS ----------
+    const isMod = interaction.member.permissions.has(PermissionsBitField.Flags.ManageGuild);
+
+    if (interaction.commandName === "stats") {
+      if (!isMod) return interaction.reply({ content: "❌ Mods only.", ephemeral: true });
+
+      const target = interaction.options.getUser("user", true);
+      const u = ensureUser(target.id);
+      const lastXp = u.lastXpAt ? `<t:${Math.floor(u.lastXpAt / 1000)}:R>` : "Never";
+
+      const embed = new EmbedBuilder()
+        .setTitle("📊 User Stats")
+        .addFields(
+          { name: "User", value: `${target}`, inline: true },
+          { name: "Level", value: String(u.level), inline: true },
+          { name: "XP", value: `${u.xp} / ${xpNeeded(u.level)}`, inline: true },
+          { name: "Last XP Gain", value: lastXp, inline: false }
+        )
+        .setTimestamp();
+
+      return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    if (interaction.commandName === "xpreset") {
+      if (!isMod) return interaction.reply({ content: "❌ Mods only.", ephemeral: true });
+
+      const target = interaction.options.getUser("user", true);
+      const newLevel = interaction.options.getInteger("level") ?? 1;
+
+      if (newLevel < 1) return interaction.reply({ content: "Level must be 1 or higher.", ephemeral: true });
+
+      data.users[target.id] = { level: newLevel, xp: 0, lastXpAt: 0 };
+      saveData(data);
+
+      const member = await interaction.guild.members.fetch(target.id).catch(() => null);
+      if (member) {
+        await removeAllLevelRoles(member);
+        await applyLevelRoles(member, newLevel);
+      }
+
+      return interaction.reply({
+        content: `🔄 Reset **${target.tag}** to **Level ${newLevel}** (XP = 0).`,
+        ephemeral: true
+      });
+    }
+
+    if (interaction.commandName === "givexp") {
+      if (!isMod) return interaction.reply({ content: "❌ Mods only.", ephemeral: true });
+
+      const target = interaction.options.getUser("user", true);
+      const amount = interaction.options.getInteger("amount", true);
+
+      if (amount === 0) {
+        return interaction.reply({ content: "Amount must not be 0.", ephemeral: true });
+      }
+
+      const u = ensureUser(target.id);
+      u.xp = Math.max(0, u.xp + amount); // allow negative but don't go below 0
+      saveData(data);
+
+      const member = await interaction.guild.members.fetch(target.id).catch(() => null);
+
+      // For mod-awarded XP: we level up silently (no cringe spam)
+      // We still apply roles correctly.
+      let leveledTo = null;
+      while (u.xp >= xpNeeded(u.level)) {
+        u.xp -= xpNeeded(u.level);
+        u.level += 1;
+        leveledTo = u.level;
+      }
+      saveData(data);
+
+      if (member) {
+        await removeAllLevelRoles(member);
+        await applyLevelRoles(member, u.level);
+      }
+
+      return interaction.reply({
+        content:
+          `✅ Updated **${target.tag}** by **${amount} XP**.\n` +
+          `Now: **Level ${u.level}**, **${u.xp} / ${xpNeeded(u.level)} XP**` +
+          (leveledTo ? `\n(Leveled up to **${leveledTo}**)` : ""),
+        ephemeral: true
+      });
+    }
+    // ---------- END MOD COMMANDS ----------
+
+    // ---------- Normal user commands ----------
     if (interaction.commandName === "level") {
       const target = interaction.options.getUser("user") || interaction.user;
       const u = ensureUser(target.id);
@@ -373,8 +485,7 @@ client.on("interactionCreate", async (interaction) => {
         });
       }
 
-      const role = interaction.options.getRole("role");
-      if (!role) return interaction.reply({ content: "Role missing.", ephemeral: true });
+      const role = interaction.options.getRole("role", true);
 
       if (sub === "allow") {
         if (!data.selfRoles.includes(role.id)) data.selfRoles.push(role.id);
@@ -391,8 +502,7 @@ client.on("interactionCreate", async (interaction) => {
 
     if (interaction.commandName === "role") {
       const sub = interaction.options.getSubcommand();
-      const role = interaction.options.getRole("role");
-      if (!role) return interaction.reply({ content: "Role missing.", ephemeral: true });
+      const role = interaction.options.getRole("role", true);
 
       if (!data.selfRoles.includes(role.id)) {
         return interaction.reply({ content: "❌ That role is not self-assignable.", ephemeral: true });
@@ -455,4 +565,3 @@ client.on("interactionCreate", async (interaction) => {
 
 // -------------------- Login --------------------
 client.login(process.env.DISCORD_TOKEN).catch(console.error);
-
