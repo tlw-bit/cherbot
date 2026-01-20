@@ -1081,15 +1081,30 @@ client.on("interactionCreate", async (interaction) => {
         const sponsorPing = sponsorId ? `<@${sponsorId}>` : "";
         const content = [pingText, sponsorPing].filter(Boolean).join(" ").trim();
 
-        const msg = await gwChannel.send({
-          content: content || undefined,
-          embeds: [embed],
-          components: [row],
-          allowedMentions: {
-            roles: shouldPing && config.giveawayRoleId ? [String(config.giveawayRoleId)] : [],
-            users: sponsorId ? [sponsorId] : [],
-          },
-        });
+     let msg;
+try {
+  msg = await gwChannel.send({
+    content: content || undefined,
+    embeds: [embed],
+    components: [row],
+    allowedMentions: {
+      roles: shouldPing && config.giveawayRoleId ? [String(config.giveawayRoleId)] : [],
+      users: sponsorId ? [sponsorId] : [],
+    },
+  });
+} catch (e) {
+  console.error("Giveaway start send failed:", e?.stack || e);
+  return interaction.editReply({
+    content:
+      "❌ I couldn't post the giveaway message. Check my permissions in the giveaway channel:\n" +
+      "• View Channel\n" +
+      "• Send Messages\n" +
+      "• Embed Links\n" +
+      "• Use External Emojis (optional)\n" +
+      "• Mention @roles (only if ping is enabled)",
+  });
+}
+
 
         const row2 = new ActionRowBuilder().addComponents(
           new ButtonBuilder()
@@ -1357,6 +1372,7 @@ if (!token) {
 }
 
 client.login(token).catch(console.error);
+
 
 
 
