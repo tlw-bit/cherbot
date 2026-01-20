@@ -1031,15 +1031,30 @@ client.on("interactionCreate", async (interaction) => {
 
         const endsAt = Date.now() + ms;
 
-        const embed = new EmbedBuilder()
-          .setTitle("🎉 Giveaway Started")
-          .setDescription(
-            `**Prize:** ${prize}\n` +
-            `**Winners:** ${winners}\n` +
-            `**Ends:** <t:${Math.floor(endsAt / 1000)}:R>\n\n` +
-            `Click the button below to enter!`
-          )
-          .setTimestamp();
+    const embed = new EmbedBuilder()
+  .setTitle("🎉 Giveaway Started")
+  .setDescription(
+    `**Prize:** ${prize}\n` +
+    `**Winners:** ${winners}\n` +
+    `**Ends:** <t:${Math.floor(endsAt / 1000)}:R>\n\n` +
+    `Click the button below to enter!`
+  )
+  .addFields(
+    {
+      name: "🧑‍💼 Hosted by",
+      value: `<@${interaction.user.id}>`,
+      inline: true,
+    },
+    sponsorId
+      ? {
+          name: "🎁 Sponsored by",
+          value: `<@${sponsorId}>`,
+          inline: true,
+        }
+      : null
+  )
+  .setTimestamp();
+
 
         const row = new ActionRowBuilder().addComponents(
           new ButtonBuilder()
@@ -1234,6 +1249,7 @@ if (!token) {
 }
 
 client.login(token).catch(console.error);
+
 
 
 
