@@ -815,96 +815,96 @@ if (/^!minidraw$/i.test(content)) {
       return;
     }
 
-    // -------------------- CLAIM NUMBERS (type numbers) --------------------
-    const nums = content.match(/\d+/g)?.map((n) => Number(n)) ?? [];
-    const looksLikeNumberClaim = nums.length > 0 && content.replace(/[0-9,\s]/g, "") === "";
+   // -------------------- CLAIM NUMBERS (type numbers) --------------------
+const nums = content.match(/\d+/g)?.map((n) => Number(n)) ?? [];
+const looksLikeNumberClaim = nums.length > 0 && content.replace(/[0-9,\s]/g, "") === "";
 
-    if (looksLikeNumberClaim) {
-      const raffle = getRaffle(message.guild.id, message.channel.id);
-      if (raffle.active && raffle.max > 0) {
-        const uniqueNums = [...new Set(nums)];
-        const invalid = uniqueNums.filter((n) => n < 1 || n > raffle.max);
-        if (invalid.length) {
-          await message.reply(`Pick numbers between 1 and ${raffle.max}. Invalid: ${invalid.join(", ")}`).catch(() => {});
-          return;
-        }
-
-        const mainKey = raffleKey(message.guild.id, message.channel.id);
-        const res = getReservation(mainKey, message.author.id);
-        const freeMode = isFreeRaffle(raffle);
-
-        // Free raffle: 1 per person unless reservation exists
-        const alreadyCount = countUserClaims(raffle, message.author.id);
-        if (freeMode && alreadyCount >= 1 && !res) {
-          await message.reply("This is a **FREE** raffle: you can only claim **1** slot. Use `free` to change it.").catch(() => {});
-          return;
-        }
-
-        const allowed = res ? res.remaining : uniqueNums.length;
-        const toTry = uniqueNums.slice(0, allowed);
-
-        const claimed = [];
-        const taken = [];
-for (const n of toTry) {
-  const key = String(n);
-  const owners = raffle.claims[key];
-
-  // If empty, claim it
-  if (!owners || owners.length === 0) {
-    raffle.claims[key] = [message.author.id];
-    claimed.push(n);
-    continue;
-  }
-
-  // If already yours, ignore it (prevents duplicates)
-  if (owners.includes(message.author.id)) {
-    continue;
-  }
-
-  // Allow split for paid raffles only (you already enforce this elsewhere)
-  // If you want to allow split in minis too, leave this enabled.
-  if (owners.length === 1 && !isFreeRaffle(raffle)) {
-    raffle.claims[key] = [owners[0], message.author.id];
-    claimed.push(n);
-    continue;
-  }
-
-  // Otherwise it's taken
-  taken.push(n);
-}
-
-        }
-
-        if (!claimed.length) {
-          await message.reply(`❌ None claimed. Taken: ${taken.length ? taken.join(", ") : "all requested slots were taken"}`).catch(() => {});
-          return;
-        }
-
-        saveData(data);
-        if (res) useReservation(mainKey, message.author.id, claimed.length);
-
-        await postOrUpdateBoard(message.channel, raffle);
-
-        const afterRes = getReservation(mainKey, message.author.id);
-        const extra = afterRes
-          ? `\nMini allowance left: **${afterRes.remaining}** (expires <t:${Math.floor(afterRes.expiresAt / 1000)}:R>)`
-          : "";
-
-        await message.reply(
-          `✅ Claimed: **${claimed.join(", ")}**` +
-          (taken.length ? `\nAlready taken: ${taken.join(", ")}` : "") +
-          extra
-        ).catch(() => {});
-
-        if (isRaffleFull(raffle)) {
-          raffle.active = false;
-          saveData(data);
-          await message.channel.send("✅ **FULL** — all slots claimed. Mods can now `/roll` the winner 🎲").catch(() => {});
-        }
-
-        return; // no XP for claim-only messages
-      }
+if (looksLikeNumberClaim) {
+  const raffle = getRaffle(message.guild.id, message.channel.id);
+  if (raffle.active && raffle.max > 0) {
+    const uniqueNums = [...new Set(nums)];
+    const invalid = uniqueNums.filter((n) => n < 1 || n > raffle.max);
+    if (invalid.length) {
+      await message.reply(`Pick numbers between 1 and ${raffle.max}. Invalid: ${invalid.join(", ")}`).catch(() => {});
+      return;
     }
+
+    const mainKey = raffleKey(message.guild.id, message.channel.id);
+    const res = getReservation(mainKey, message.author.id);
+    const freeMode = isFreeRaffle(raffle);
+
+    // Free raffle: 1 per person unless reservation exists
+    const alreadyCount = countUserClaims(raffle, message.author.id);
+    if (freeMode && alreadyCount >= 1 && !res) {
+      await message.reply("This is a **FREE** raffle: you can only claim **1** slot. Use `free` to change it.").catch(() => {});
+      return;
+    }
+
+    const allowed = res ? res.remaining : uniqueNums.length;
+    const toTry = uniqueNums.slice(0, allowed);
+
+    const claimed = [];
+    const taken = [];
+
+    for (const n of toTry) {
+      const key = String(n);
+      const owners = raffle.claims[key];
+
+      // If empty, claim it
+      if (!owners || owners.length === 0) {
+        raffle.claims[key] = [message.author.id];
+        claimed.push(n);
+        continue;
+      }
+
+      // If already yours, ignore it (prevents duplicates)
+      if (owners.includes(message.author.id)) {
+        continue;
+      }
+
+      // Allow split for paid raffles only
+      if (owners.length === 1 && !isFreeRaffle(raffle)) {
+        raffle.claims[key] = [owners[0], message.author.id];
+        claimed.push(n);
+        continue;
+      }
+
+      // Otherwise it's taken
+      taken.push(n);
+    }
+
+    if (!claimed.length) {
+      await message.reply(
+        `❌ None claimed. Taken: ${taken.length ? taken.join(", ") : "all requested slots were taken"}`
+      ).catch(() => {});
+      return;
+    }
+
+    saveData(data);
+    if (res) useReservation(mainKey, message.author.id, claimed.length);
+
+    await postOrUpdateBoard(message.channel, raffle);
+
+    const afterRes = getReservation(mainKey, message.author.id);
+    const extra = afterRes
+      ? `\nMini allowance left: **${afterRes.remaining}** (expires <t:${Math.floor(afterRes.expiresAt / 1000)}:R>)`
+      : "";
+
+    await message.reply(
+      `✅ Claimed: **${claimed.join(", ")}**` +
+      (taken.length ? `\nAlready taken: ${taken.join(", ")}` : "") +
+      extra
+    ).catch(() => {});
+
+    if (isRaffleFull(raffle)) {
+      raffle.active = false;
+      saveData(data);
+      await message.channel.send("✅ **FULL** — all slots claimed. Mods can now `/roll` the winner 🎲").catch(() => {});
+    }
+
+    return; // no XP for claim-only messages
+  }
+}
 
     // -------------------- XP system --------------------
     if (!shouldAwardXp(message.channel.id)) return;
@@ -1155,4 +1155,5 @@ if (!token) {
 }
 
 client.login(token).catch(console.error);
+
 
