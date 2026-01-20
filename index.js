@@ -505,14 +505,18 @@ console.log(
 
     ensureRaffleData();
 
+       ensureRaffleData();
+
     const content = message.content.trim();
-    const isMod = isModMember(message.member);
+    // ✅ do NOT redeclare isMod, we already made it above
+    // const isMod = isModMember(message.member);
 
     // optional prefix
     if (content.toLowerCase() === "!code") {
       return message.reply(`🧾 Cherbot code: **${makeToyCode()}**`).catch(() => {});
     }
     if (content.toLowerCase() === "!getcode") return;
+
 
     // Thread-aware channel checks
     const raffleCreateId = String(config.raffleCreateChannelId || "").trim();
@@ -1305,6 +1309,7 @@ console.log("Bot starting...");
 console.log("Token present?", Boolean(token), "Length:", token.length);
 
 client.login(token).catch(console.error);
+
 
 
 
