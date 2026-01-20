@@ -1073,31 +1073,28 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.isButton()) {
       const id = interaction.customId;
 
-      // Giveaway join button
-      if (id.startsWith("giveaway:enter:")) {
-        ensureGiveawayData();
-        const messageId = id.split(":")[2];
-        const g = data.giveaways[messageId];
+   // Giveaway join button + live counter update
+if (id.startsWith("giveaway:enter:")) {
+  ensureGiveawayData();
+  const messageId = id.split(":")[2];
+  const g = data.giveaways[messageId];
 
-        if (!g) return interaction.reply({ content: "❌ This giveaway no longer exists.", ephemeral: true });
-        if (g.ended) return interaction.reply({ content: "❌ This giveaway has ended.", ephemeral: true });
+  if (!g) return interaction.reply({ content: "❌ This giveaway no longer exists.", ephemeral: true });
+  if (g.ended) return interaction.reply({ content: "❌ This giveaway has ended.", ephemeral: true });
 
-        if (!Array.isArray(g.participants)) g.participants = [];
-        if (g.participants.includes(interaction.user.id)) {
-          return interaction.reply({ content: "✅ You’re already entered!", ephemeral: true });
-        }
+  if (!Array.isArray(g.participants)) g.participants = [];
+  if (g.participants.includes(interaction.user.id)) {
+    return interaction.reply({ content: "✅ You’re already entered!", ephemeral: true });
+  }
 
-        g.participants.push(interaction.user.id);
-        data.giveaways[messageId] = g;
-        saveData(data);
+  g.participants.push(interaction.user.id);
+  data.giveaways[messageId] = g;
+  saveData(data);
 
-        const embed = new EmbedBuilder()
-          .setTitle("🎁 Giveaway Entry")
-          .setDescription(`You joined: **${g.prize}**\nEntries: **${g.participants.length}**`)
-          .setTimestamp();
+  // Update the giveaway message embed to show new entry count
+  try {
+    const giveawayChannelId = String(g.channelId || "").trim();
 
-        return interaction.reply({ embeds: [embed], ephemeral: true });
-      }
 
       // Selfrole button
       if (!id.startsWith("selfrole:")) return;
@@ -1421,3 +1418,4 @@ console.log("Bot starting...");
 console.log("Token present?", Boolean(token), "Length:", token.length);
 
 client.login(token).catch(console.error);
+
