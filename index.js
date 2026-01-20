@@ -263,6 +263,15 @@ function pickWinnersFrom(array, count) {
 async function endGiveawayByMessageId(client, messageId, { reroll = false } = {}) {
   ensureGiveawayData();
   const g = data.giveaways[messageId];
+  console.log("🏁 endGiveawayByMessageId:", {
+  messageId,
+  guildId: g?.guildId,
+  channelId: g?.channelId,
+  winnersChannelId: config.giveawayWinnerChannelId,
+  ended: g?.ended,
+  endsAt: g?.endsAt
+});
+
   if (!g) return { ok: false, reason: "Giveaway not found." };
   if (g.ended && !reroll) return { ok: false, reason: "Giveaway already ended." };
 
@@ -1441,3 +1450,4 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
+
