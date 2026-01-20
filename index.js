@@ -488,8 +488,11 @@ client.on("messageCreate", async (message) => {
 // -------------------- Interactions (buttons + slash commands) --------------------
 client.on("interactionCreate", async (interaction) => {
   try {
-    if (interaction.isButton()) {
-      const id = interaction.customId;
+    // ...buttons + slash commands...
+  } catch (err) {
+    console.error("interactionCreate error:", err);
+  }
+});
 
       // Giveaway join button
       if (id.startsWith("giveaway:enter:")) {
@@ -1135,4 +1138,5 @@ client.on("interactionCreate", async (interaction) => {
     console.error("messageCreate error:", err);
   }
 });
+
 
