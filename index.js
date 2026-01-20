@@ -33,6 +33,7 @@ client.once("ready", () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
   ensureGiveawayData();
   ensureRaffleData();
+console.log("RAFFLE IDs:", config.raffleCreateChannelId, config.miniCreateChannelId);
 
   // giveaway sweep every 30s
   setInterval(() => giveawaySweep(client).catch(() => {}), 30 * 1000);
@@ -1282,3 +1283,4 @@ console.log("Bot starting...");
 console.log("Token present?", Boolean(token), "Length:", token.length);
 
 client.login(token).catch(console.error);
+
