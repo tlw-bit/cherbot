@@ -1020,11 +1020,8 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.commandName === "giveaway") {
       if (!isMod) return interaction.reply({ content: "❌ Mods only.", ephemeral: true });
 
-      // ACK immediately so Discord doesn't time out
+      // ACK immediately
       await interaction.deferReply({ ephemeral: true }).catch(() => {});
-
-      // ✅ PROOF OF LIFE (you will always see this)
-      await interaction.editReply({ content: "⏳ Starting giveaway..." }).catch(() => {});
 
       ensureGiveawayData();
       const sub = interaction.options.getSubcommand();
@@ -1063,6 +1060,7 @@ client.on("interactionCreate", async (interaction) => {
           .addFields(fields)
           .setTimestamp();
 
+        // Temporary row to post, then we edit with correct messageId
         const row = new ActionRowBuilder().addComponents(
           new ButtonBuilder()
             .setCustomId("giveaway:enter:pending")
@@ -1106,6 +1104,7 @@ client.on("interactionCreate", async (interaction) => {
           });
         }
 
+        // Now replace the pending button with a real button containing the messageId
         const row2 = new ActionRowBuilder().addComponents(
           new ButtonBuilder()
             .setCustomId(`giveaway:enter:${msg.id}`)
@@ -1129,16 +1128,16 @@ client.on("interactionCreate", async (interaction) => {
         };
         saveData(data);
 
-        return interaction.editReply({
-          content: `✅ Giveaway started in <#${gwChannel.id}> (ID: \`${msg.id}\`)`,
-        });
+        return interaction.editReply({ content: `✅ Giveaway started in <#${gwChannel.id}> (ID: \`${msg.id}\`)` });
       }
 
       // END
       if (sub === "end") {
         const messageId = interaction.options.getString("messageid", true);
         const result = await endGiveawayByMessageId(client, messageId).catch(() => null);
-        if (!result || !result.ok) return interaction.editReply({ content: `❌ ${result?.reason || "Failed to end giveaway."}` });
+        if (!result || !result.ok) {
+          return interaction.editReply({ content: `❌ ${result?.reason || "Failed to end giveaway."}` });
+        }
         return interaction.editReply({ content: "✅ Giveaway ended." });
       }
 
@@ -1146,7 +1145,9 @@ client.on("interactionCreate", async (interaction) => {
       if (sub === "reroll") {
         const messageId = interaction.options.getString("messageid", true);
         const result = await endGiveawayByMessageId(client, messageId, { reroll: true }).catch(() => null);
-        if (!result || !result.ok) return interaction.editReply({ content: `❌ ${result?.reason || "Failed to reroll."}` });
+        if (!result || !result.ok) {
+          return interaction.editReply({ content: `❌ ${result?.reason || "Failed to reroll."}` });
+        }
         return interaction.editReply({ content: "🔁 Giveaway rerolled." });
       }
 
@@ -1164,7 +1165,7 @@ client.on("interactionCreate", async (interaction) => {
       const owners = raffle.claims?.[String(result)] || [];
       const normalizedOwners = Array.isArray(owners) ? owners.map(normalizeUserId).filter(Boolean) : [];
 
-      // If this is a mini thread, post claim message in main
+      // Mini roll -> transfer to main thread
       if (meta && raffle?.max === sides && raffle.max > 0) {
         const winnerId = normalizedOwners.length ? normalizedOwners[randInt(0, normalizedOwners.length - 1)] : null;
 
@@ -1214,7 +1215,7 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
 
-      // Normal raffle draw logic
+      // Normal raffle draw
       if (raffle?.max === sides && raffle.max > 0) {
         const winnerUserId = normalizedOwners.length ? normalizedOwners[0] : null;
 
@@ -1256,16 +1257,13 @@ client.on("interactionCreate", async (interaction) => {
     } catch {}
   }
 });
-
 // -------------------- Login --------------------
 const token = String(process.env.DISCORD_TOKEN || "").trim();
 if (!token) {
-  console.error("❌ No Discord token found (DISCORD_TOKEN env or config.json token).");
+  console.error("❌ No Discord token found (DISCORD_TOKEN env).");
   process.exit(1);
 }
-
 client.login(token).catch(console.error);
-
 
 
 
