@@ -1,8 +1,8 @@
-// Cherbot (Discord.js v14) — clean + stable
-// NO getcode (so it won't clash with Verifier)
-// Adds: /stats, /xpreset, /givexp (mods only)
-// Adds: MAIN raffle (threads) + MINI raffles + @gamba ping + mains-left + split + total + /roll
-// Adds: Giveaways (separate system) with join button + sweep auto-end
+// Cherbot (Discord.js v14) — clean + stable single-file
+// - XP + levels + level roles
+// - Giveaways (separate system): /giveaway start/end/reroll + join button + sweep auto-end
+// - Raffles inside threads (main + minis) + @gamba ping + mains-left + split + total + /roll helper
+// - NO /getcode (so it won't clash with Verifier)
 
 const fs = require("fs");
 const path = require("path");
@@ -24,26 +24,18 @@ const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent, // XP + prefix + raffles
+    GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMembers,
   ],
-});
-
-client.once("ready", () => {
-  console.log(`✅ Logged in as ${client.user.tag}`);
-  ensureGiveawayData();
-  ensureRaffleData();
-console.log("RAFFLE IDs:", config.raffleCreateChannelId, config.miniCreateChannelId);
-
-  // giveaway sweep every 30s
-  setInterval(() => giveawaySweep(client).catch(() => {}), 30 * 1000);
 });
 
 // -------------------- Data storage --------------------
 const DATA_FILE = path.join(__dirname, "data.json");
 
 function loadData() {
-  if (!fs.existsSync(DATA_FILE)) return { users: {}, selfRoles: [], giveaways: {}, raffles: {}, reservations: {}, miniThreads: {} };
+  if (!fs.existsSync(DATA_FILE)) {
+    return { users: {}, selfRoles: [], giveaways: {}, raffles: {}, reservations: {}, miniThreads: {} };
+  }
   try {
     const parsed = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
     if (!parsed.users) parsed.users = {};
@@ -63,6 +55,28 @@ function saveData(obj) {
 }
 
 let data = loadData();
+
+function ensureGiveawayData() {
+  if (!data.giveaways) data.giveaways = {};
+}
+
+function ensureRaffleData() {
+  if (!data.raffles) data.raffles = {};
+  if (!data.reservations) data.reservations = {};
+  if (!data.miniThreads) data.miniThreads = {};
+}
+
+// -------------------- Ready --------------------
+client.once("ready", () => {
+  console.log(`✅ Logged in as ${client.user.tag}`);
+  ensureGiveawayData();
+  ensureRaffleData();
+
+  console.log("RAFFLE IDs:", config.raffleCreateChannelId, config.miniCreateChannelId);
+
+  // giveaway sweep every 30s
+  setInterval(() => giveawaySweep(client).catch(() => {}), 30 * 1000);
+});
 
 // -------------------- Helpers --------------------
 function randInt(min, max) {
@@ -87,26 +101,12 @@ function gambaMention() {
   return rid ? `<@&${rid}>` : "";
 }
 
-// XP allow/block (optional)
 function shouldAwardXp(channelId) {
   const allowed = Array.isArray(config.xpAllowedChannelIds) ? config.xpAllowedChannelIds.map(String) : [];
   const blocked = Array.isArray(config.xpBlockedChannelIds) ? config.xpBlockedChannelIds.map(String) : [];
   if (blocked.includes(String(channelId))) return false;
   if (allowed.length > 0 && !allowed.includes(String(channelId))) return false;
   return true;
-}
-
-// -------------------- Log channel helpers (optional) --------------------
-function getLogChannel(guild) {
-  const id = String(config.logChannelId || "").trim();
-  if (!id) return null;
-  return guild.channels.cache.get(id) || null;
-}
-
-function logEmbed(guild, embed) {
-  const ch = getLogChannel(guild);
-  if (!ch) return;
-  ch.send({ embeds: [embed] }).catch(() => {});
 }
 
 // -------------------- Level roles helpers --------------------
@@ -152,15 +152,6 @@ async function announceLevelUp(guild, fallbackChannel, user, newLevel) {
   if (!postedChannel && fallbackChannel) {
     await fallbackChannel.send({ content: line }).catch(() => {});
   }
-
-  if (config.logChannelId) {
-    const embed = new EmbedBuilder()
-      .setTitle("✨ Level Up")
-      .setDescription(line)
-      .addFields({ name: "Level", value: String(newLevel), inline: true })
-      .setTimestamp();
-    logEmbed(guild, embed);
-  }
 }
 
 async function applyLevelRoles(member, level) {
@@ -199,23 +190,17 @@ async function processLevelUps({ guild, channel, userObj, userDiscord, member })
     userObj.xp -= xpNeeded(userObj.level);
     userObj.level += 1;
 
-    if (guild && channel && userDiscord) {
-      await announceLevelUp(guild, channel, userDiscord, userObj.level);
-    }
-    if (member) await applyLevelRoles(member, userObj.level);
+    await announceLevelUp(guild, channel, userDiscord, userObj.level).catch(() => {});
+    if (member) await applyLevelRoles(member, userObj.level).catch(() => {});
   }
 }
 
-// -------------------- Optional harmless prefix command --------------------
+// -------------------- Optional prefix command --------------------
 function makeToyCode() {
   return "cher-" + Math.random().toString(36).slice(2, 8).toUpperCase();
 }
 
 // -------------------- Giveaway helpers --------------------
-function ensureGiveawayData() {
-  if (!data.giveaways) data.giveaways = {}; // messageId -> giveaway
-}
-
 function parseDurationToMs(input) {
   const s = String(input || "").trim().toLowerCase();
   const m = s.match(/^(\d+)\s*([mhd])$/i);
@@ -269,10 +254,8 @@ async function endGiveawayByMessageId(client, messageId, { reroll = false } = {}
     .setDescription(`**Prize:** ${prize}\n**Winners:** ${winnerText}`)
     .setTimestamp();
 
-  // announce in winner channel if set
   const winnerChannelId = String(config.giveawayWinnerChannelId || "").trim();
   const winCh = winnerChannelId ? await guild.channels.fetch(winnerChannelId).catch(() => null) : null;
-
   const targetCh = (winCh && winCh.isTextBased()) ? winCh : gwChannel;
 
   await targetCh.send({ content: winners.length ? winnerText : "", embeds: [embed] }).catch(() => {});
@@ -304,18 +287,11 @@ async function giveawaySweep(client) {
   }
 }
 
-// -------------------- Raffle / Mini storage --------------------
-function ensureRaffleData() {
-  if (!data.raffles) data.raffles = {};         // key -> raffle
-  if (!data.reservations) data.reservations = {}; // mainKey -> userId -> {remaining, expiresAt}
-  if (!data.miniThreads) data.miniThreads = {}; // miniThreadId -> { mainKey, tickets }
-}
-
+// -------------------- Raffle / Mini helpers --------------------
 function raffleKey(guildId, channelId) {
   return `${guildId}:${channelId}`;
 }
 
-// raffle object per thread/channel
 function getRaffle(guildId, channelId) {
   ensureRaffleData();
   const key = raffleKey(guildId, channelId);
@@ -324,7 +300,7 @@ function getRaffle(guildId, channelId) {
       active: false,
       max: 0,
       priceText: "",
-      claims: {}, // "1" -> ["userId"] or ["userId","userId2"]
+      claims: {}, // "1" -> ["userId"] or ["userId","friendId"]
       lastBoardMessageId: null,
       lastMainsLeftAnnounced: null,
       createdAt: Date.now(),
@@ -377,7 +353,10 @@ function countUserClaims(raffle, userId) {
 function formatBoardText(raffle) {
   const closed = !raffle.active || isRaffleFull(raffle);
   const status = closed ? " ✅ **FULL / CLOSED**" : "";
-  const header = `🎟️ Raffle: **${raffle.max} slots**${raffle.priceText ? ` (**${raffle.priceText}**)` : ""}${status}`;
+  const header =
+    `🎟️ Raffle: **${raffle.max} slots**` +
+    (raffle.priceText ? ` (**${raffle.priceText}**)` : "") +
+    status;
 
   const lines = [];
   for (let i = 1; i <= raffle.max; i++) {
@@ -407,7 +386,7 @@ async function postOrUpdateBoard(channel, raffle) {
   }
 }
 
-// -------------------- Reservations (per main raffle thread) --------------------
+// -------------------- Reservations --------------------
 function getReservation(mainKey, userId) {
   ensureRaffleData();
   const bucket = data.reservations[mainKey];
@@ -473,107 +452,22 @@ async function announceMainsLeftIfChanged(channel, mainRaffle, mainKey) {
   saveData(data);
   await channel.send(`📌 **${left} MAINS LEFT**`).catch(() => {});
 }
-// -------------------- Prefix commands + XP + raffles --------------------
+
+// -------------------- MESSAGE CREATE (THIS IS THE PART YOU WERE MISSING) --------------------
 client.on("messageCreate", async (message) => {
   try {
     if (!message.guild) return;
     if (message.author.bot) return;
 
-    // ...your raffle + XP code here...
+    ensureRaffleData();
+    ensureGiveawayData();
 
-  } catch (err) {
-    console.error("messageCreate error:", err);
-  }
-});
-// -------------------- Interactions (buttons + slash commands) --------------------
-client.on("interactionCreate", async (interaction) => {
-  try {
-    // ...buttons + slash commands...
-  } catch (err) {
-    console.error("interactionCreate error:", err);
-  }
-});
+    const content = message.content.trim();
+    const isMod = isModMember(message.member);
 
-      // Giveaway join button
-      if (id.startsWith("giveaway:enter:")) {
-        ensureGiveawayData();
-
-        const messageId = id.split(":")[2];
-        const g = data.giveaways?.[messageId];
-
-        if (!g) return interaction.reply({ content: "❌ This giveaway no longer exists.", ephemeral: true });
-        if (g.ended) return interaction.reply({ content: "❌ This giveaway has ended.", ephemeral: true });
-
-        if (!Array.isArray(g.participants)) g.participants = [];
-        if (g.participants.includes(interaction.user.id)) {
-          return interaction.reply({ content: "✅ You’re already entered!", ephemeral: true });
-        }
-
-        g.participants.push(interaction.user.id);
-        data.giveaways[messageId] = g;
-        saveData(data);
-
-        return interaction.reply({ content: `✅ Entered! Entries: **${g.participants.length}**`, ephemeral: true });
-      }
-
-      // Selfrole buttons
-      if (id.startsWith("selfrole:")) {
-        const roleId = id.split(":")[1];
-
-        if (!data.selfRoles?.includes(roleId)) {
-          return interaction.reply({ content: "❌ That role is no longer self-assignable.", ephemeral: true });
-        }
-
-        const role = interaction.guild.roles.cache.get(roleId);
-        if (!role) return interaction.reply({ content: "❌ Role not found.", ephemeral: true });
-
-        const me = interaction.guild.members.me;
-        if (!me?.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
-          return interaction.reply({ content: "❌ I need **Manage Roles** permission.", ephemeral: true });
-        }
-
-        // ✅ this await is now definitely inside async function
-        const member = await interaction.guild.members.fetch(interaction.user.id);
-        const already = member.roles.cache.has(roleId);
-
-        try {
-          if (already) await member.roles.remove(role);
-          else await member.roles.add(role);
-
-          return interaction.reply({
-            content: `${already ? "Removed" : "Added"} ${role} ${already ? "from" : "to"} you.`,
-            ephemeral: true,
-          });
-        } catch {
-          return interaction.reply({ content: "❌ I couldn’t change that role. Check my role position.", ephemeral: true });
-        }
-      }
-
-      return; // ignore other buttons
-    }
-
-    // ---------- Slash commands ----------
-    if (!interaction.isChatInputCommand()) return;
-
-    const isMod = interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageGuild);
-
-    // Put your /giveaway /roll /level /leaderboard /stats /xpreset /givexp logic here
-
-  } catch (err) {
-    console.error("interactionCreate error:", err);
-    try {
-      if (interaction.deferred || interaction.replied) {
-        await interaction.followUp({ content: "❌ Something went wrong.", ephemeral: true });
-      } else {
-        await interaction.reply({ content: "❌ Something went wrong.", ephemeral: true });
-      }
-    } catch {}
-  }
-});
-
-    // -------------------- Channel context helpers --------------------
-    const raffleCreateId = String(config.raffleCreateChannelId || "").trim();
-    const miniCreateId = String(config.miniCreateChannelId || "").trim();
+    // --- Channel context (thread-aware) ---
+    const raffleCreateId = String(config.raffleCreateChannelId || "").trim(); // main raffle create channel
+    const miniCreateId = String(config.miniCreateChannelId || "").trim();     // mini thread create channel
 
     const inMainRaffleChannel =
       String(message.channel.id) === raffleCreateId ||
@@ -587,158 +481,13 @@ client.on("interactionCreate", async (interaction) => {
     const isThreadInRaffleCreate =
       isThread && String(message.channel.parentId || "") === raffleCreateId;
 
-    const isMod = Boolean(
-      message.member?.permissions?.has(PermissionsBitField.Flags.ManageGuild)
-    );
-
-    ensureRaffleData();
-    ensureGiveawayData();
-
-    const content = message.content.trim();
-
-    // -------------------- Optional prefix command --------------------
+    // --- !code ---
     if (content.toLowerCase() === "!code") {
       return message.reply(`🧾 Cherbot code: **${makeToyCode()}**`).catch(() => {});
     }
-    if (content.toLowerCase() === "!getcode") return;
 
-    // ✅ EVERYTHING ELSE (raffle start, mini, draw, split, total, free, rest, claims, XP)
-    // stays here exactly as you already have it.
-
-    // (leave the rest of your existing messageCreate code untouched below this line)
-
-  } catch (err) {
-    console.error("messageCreate error:", err);
-  }
-});
-
-    // ---------- Buttons ----------
-    if (interaction.isButton()) {
-      const id = interaction.customId;
-
-      // Giveaway join button
-      if (id.startsWith("giveaway:enter:")) {
-        ensureGiveawayData();
-
-        const messageId = id.split(":")[2];
-        const g = data.giveaways?.[messageId];
-
-        if (!g) return interaction.reply({ content: "❌ This giveaway no longer exists.", ephemeral: true });
-        if (g.ended) return interaction.reply({ content: "❌ This giveaway has ended.", ephemeral: true });
-
-        if (!Array.isArray(g.participants)) g.participants = [];
-        if (g.participants.includes(interaction.user.id)) {
-          return interaction.reply({ content: "✅ You’re already entered!", ephemeral: true });
-        }
-
-        g.participants.push(interaction.user.id);
-        data.giveaways[messageId] = g;
-        saveData(data);
-
-        return interaction.reply({
-          content: `✅ Entered! Entries: **${g.participants.length}**`,
-          ephemeral: true
-        });
-      }
-
-      // Self-role buttons
-      if (id.startsWith("selfrole:")) {
-        const roleId = id.split(":")[1];
-
-        if (!data.selfRoles?.includes(roleId)) {
-          return interaction.reply({ content: "❌ That role is no longer self-assignable.", ephemeral: true });
-        }
-
-        const role = interaction.guild.roles.cache.get(roleId);
-        if (!role) return interaction.reply({ content: "❌ Role not found.", ephemeral: true });
-
-        const me = interaction.guild.members.me;
-        if (!me?.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
-          return interaction.reply({ content: "❌ I need **Manage Roles** permission.", ephemeral: true });
-        }
-
-        const member = await interaction.guild.members.fetch(interaction.user.id);
-        const already = member.roles.cache.has(roleId);
-
-        try {
-          if (already) await member.roles.remove(role);
-          else await member.roles.add(role);
-
-          return interaction.reply({
-            content: `${already ? "Removed" : "Added"} ${role} ${already ? "from" : "to"} you.`,
-            ephemeral: true
-          });
-        } catch {
-          return interaction.reply({
-            content: "❌ I couldn’t change that role. Check my role position.",
-            ephemeral: true
-          });
-        }
-      }
-
-      return; // ignore other buttons
-    }
-
-    // ---------- Slash Commands ----------
-    if (!interaction.isChatInputCommand()) return;
-
-    const isMod = interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageGuild);
-
-    // Defer slow ones
-    if (["leaderboard", "rolemenu"].includes(interaction.commandName)) {
-      await interaction.deferReply({ ephemeral: true });
-    }
-
-    // Now you keep your existing slash command logic BELOW:
-    // /giveaway, /roll, /level, /leaderboard, /stats, /xpreset, /givexp, etc.
-    //
-    // IMPORTANT:
-    // If you already have those slash command handlers elsewhere, DO NOT paste them twice,
-    // just move them into this block (or tell me and I’ll merge it cleanly).
-
-  } catch (err) {
-    console.error("interactionCreate error:", err);
-    if (interaction?.isRepliable?.()) {
-      try {
-        if (interaction.deferred || interaction.replied) {
-          await interaction.followUp({ content: "❌ Something went wrong.", ephemeral: true });
-        } else {
-          await interaction.reply({ content: "❌ Something went wrong.", ephemeral: true });
-        }
-      } catch {}
-    }
-  }
-});
-
-    // -------------------- Channel context helpers --------------------
-    const raffleCreateId = String(config.raffleCreateChannelId || "").trim();
-    const miniCreateId = String(config.miniCreateChannelId || "").trim();
-
-    const inMainRaffleChannel =
-      String(message.channel.id) === raffleCreateId ||
-      String(message.channel.parentId || "") === raffleCreateId;
-
-    const inMiniCreateChannel =
-      String(message.channel.id) === miniCreateId ||
-      String(message.channel.parentId || "") === miniCreateId;
-
-    const isThread =
-      message.channel.type === ChannelType.PublicThread ||
-      message.channel.type === ChannelType.PrivateThread ||
-      Boolean(message.channel.isThread?.());
-
-    const isThreadInRaffleCreate = isThread && String(message.channel.parentId || "") === raffleCreateId;
-
-    const isMod = Boolean(
-      message.member?.permissions?.has(PermissionsBitField.Flags.ManageGuild)
-    );
-
-    ensureRaffleData();
-
-    const content = message.content.trim();
-
-    // -------------------- MAIN RAFFLE START --------------------
-    // Use inside a thread under raffleCreate channel
+    // -------------------- MAIN RAFFLE START (inside thread under raffleCreate) --------------------
+    // "!10 slots FREE" / "!10 slots 50 coins"
     const startMatch = content.match(/^!(\d+)\s+slots(?:\s+(.+))?$/i);
     if (startMatch && inMainRaffleChannel) {
       if (!isMod) return message.reply("❌ Mods only.").catch(() => {});
@@ -765,18 +514,15 @@ client.on("interactionCreate", async (interaction) => {
 
       const ping = gambaMention();
       if (ping) await message.channel.send(ping).catch(() => {});
-
       await postOrUpdateBoard(message.channel, raffle);
+      await announceMainsLeftIfChanged(message.channel, raffle, raffleKey(message.guild.id, message.channel.id));
 
-      await message.reply(
-        `✅ Raffle started: **${max} slots** (**${priceText}**).\nType numbers to claim like: \`1\` or \`2 5 6\``
-      ).catch(() => {});
+      await message.reply(`✅ Raffle started: **${max} slots** (**${priceText}**). Type numbers to claim.`).catch(() => {});
       return;
     }
 
-    // -------------------- MINI CREATE --------------------
-    // Must be run INSIDE a main raffle thread (under raffleCreate channel)
-    // !mini 4x - 50 coins           => default mini slots (6)
+    // -------------------- MINI CREATE (run inside main raffle thread) --------------------
+    // !mini 4x - 50 coins           => default mini slots (miniDefaultSlots, default 6)
     // !mini 4x 4 - 50 coins         => 4-slot mini
     const miniMatch = content.match(/^!mini\s+(\d+)\s*x(?:\s+(\d+))?\s*-\s*(\d+)\s*(?:c|coins?)$/i);
     if (miniMatch && inMainRaffleChannel) {
@@ -789,21 +535,15 @@ client.on("interactionCreate", async (interaction) => {
       const miniSlots = Number(miniMatch[2] || (config.miniDefaultSlots ?? 6));
       const mainTicketPrice = Number(miniMatch[3]);
 
-      if (!Number.isFinite(tickets) || tickets < 1 || tickets > 50) {
-        return message.reply("Tickets must be 1–50.").catch(() => {});
-      }
-      if (!Number.isFinite(miniSlots) || miniSlots < 2 || miniSlots > 100) {
-        return message.reply("Mini slots must be 2–100.").catch(() => {});
-      }
-      if (!Number.isFinite(mainTicketPrice) || mainTicketPrice < 0 || mainTicketPrice > 1000000) {
-        return message.reply("Price looks wrong.").catch(() => {});
-      }
+      if (!Number.isFinite(tickets) || tickets < 1 || tickets > 50) return message.reply("Tickets must be 1–50.").catch(() => {});
+      if (!Number.isFinite(miniSlots) || miniSlots < 2 || miniSlots > 100) return message.reply("Mini slots must be 2–100.").catch(() => {});
+      if (!Number.isFinite(mainTicketPrice) || mainTicketPrice < 0 || mainTicketPrice > 1000000) return message.reply("Price looks wrong.").catch(() => {});
 
       const pot = tickets * mainTicketPrice;
       const perSlotExact = pot / miniSlots;
       const perSlot = Math.round(perSlotExact); // nearest whole number
 
-      // Create mini thread in the mini create channel
+      // create mini thread in mini create channel
       const miniCreateChannel = miniCreateId
         ? await message.guild.channels.fetch(miniCreateId).catch(() => null)
         : null;
@@ -820,9 +560,7 @@ client.on("interactionCreate", async (interaction) => {
         reason: "Mini raffle created",
       }).catch(() => null);
 
-      if (!miniThread) {
-        return message.reply("❌ I couldn't create the mini thread (check permissions).").catch(() => {});
-      }
+      if (!miniThread) return message.reply("❌ I couldn't create the mini thread (check permissions).").catch(() => {});
 
       data.miniThreads[miniThread.id] = { mainKey, tickets, createdAt: Date.now() };
       saveData(data);
@@ -830,7 +568,7 @@ client.on("interactionCreate", async (interaction) => {
       const miniRaffle = getRaffle(message.guild.id, miniThread.id);
       miniRaffle.active = true;
       miniRaffle.max = miniSlots;
-      miniRaffle.priceText = `${tickets}x main @ ${mainTicketPrice}c = ${pot}c pot • ${perSlot}c/slot (exact ${perSlotExact.toFixed(2)}c)`;
+      miniRaffle.priceText = `${tickets}x main @ ${mainTicketPrice}c = ${pot}c pot • ${perSlot}c/slot`;
       miniRaffle.claims = {};
       miniRaffle.lastBoardMessageId = null;
       miniRaffle.createdAt = Date.now();
@@ -844,14 +582,14 @@ client.on("interactionCreate", async (interaction) => {
         `🎲 **Mini created**\n` +
         `🎟️ Prize: **${tickets}** main ticket(s)\n` +
         `💰 Main ticket price: **${mainTicketPrice}c** → Pot: **${pot}c**\n` +
-        `🔢 Mini slots: **${miniSlots}** → **${perSlot}c per slot**\n\n` +
+        `🔢 Mini slots: **${miniSlots}** → **${perSlot}c per slot** (exact ${perSlotExact.toFixed(2)}c)\n\n` +
         `Claim by typing numbers like: \`1\` or \`1 2 3\``
       ).catch(() => {});
 
-      // Announce in main raffle thread
       await message.channel.send(
         `🎲 **Mini created:** <#${miniThread.id}>\n` +
         `✅ **${tickets} main slot(s) reserved for this mini**\n` +
+        `📌 **${computeMainsLeft(getRaffle(message.guild.id, message.channel.id), mainKey)} MAINS LEFT**\n` +
         `${ping ? ping : ""}`.trim()
       ).catch(() => {});
 
@@ -861,23 +599,16 @@ client.on("interactionCreate", async (interaction) => {
     // -------------------- MINI DRAW (inside mini thread) --------------------
     if (/^!minidraw$/i.test(content)) {
       if (!isMod) return message.reply("❌ Mods only.").catch(() => {});
-
       const meta = data.miniThreads?.[message.channel.id];
       if (!meta) return message.reply("This isn’t a registered mini thread.").catch(() => {});
 
       const miniRaffle = getRaffle(message.guild.id, message.channel.id);
-      const claimedEntries = Object.entries(miniRaffle.claims || {})
-        .filter(([, owners]) => Array.isArray(owners) && owners.length > 0);
-
-      if (claimedEntries.length === 0) {
-        return message.reply("No one has claimed any mini slots.").catch(() => {});
-      }
+      const claimedEntries = Object.entries(miniRaffle.claims || {}).filter(([, owners]) => Array.isArray(owners) && owners.length > 0);
+      if (claimedEntries.length === 0) return message.reply("No one has claimed any mini slots.").catch(() => {});
 
       const pick = claimedEntries[randInt(0, claimedEntries.length - 1)];
       const winningNumber = pick[0];
-      const owners = pick[1];
-      const winnerId = owners?.[0];
-
+      const winnerId = pick[1]?.[0];
       if (!winnerId) return message.reply("Couldn’t pick a winner.").catch(() => {});
 
       const minutes = Number(config.miniClaimWindowMinutes ?? 10);
@@ -886,17 +617,19 @@ client.on("interactionCreate", async (interaction) => {
 
       const mainThreadId = mainKey.split(":")[1];
       const mainThread = await message.guild.channels.fetch(mainThreadId).catch(() => null);
-      if (!mainThread || !mainThread.isTextBased()) {
-        return message.reply("Main raffle thread not found.").catch(() => {});
-      }
+      if (!mainThread || !mainThread.isTextBased()) return message.reply("Main raffle thread not found.").catch(() => {});
 
       setReservation(mainKey, winnerId, tickets, minutes);
+
+      const mainRaffle = getRaffle(message.guild.id, mainThread.id);
+      const left = computeMainsLeft(mainRaffle, mainKey);
 
       const ping = gambaMention();
       await mainThread.send(
         `🏆 **Mini winner:** <@${winnerId}> (won mini slot **#${winningNumber}**)\n` +
         `🎟️ Claim **${tickets}** main number(s) in this thread.\n` +
         `⏳ You have **${minutes} minutes**. Type numbers like: \`2 5 6\`\n` +
+        `📌 **${left} MAINS LEFT**\n` +
         `${ping ? ping : ""}`.trim()
       ).catch(() => {});
 
@@ -905,6 +638,7 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     // -------------------- SPLIT (paid raffles only) --------------------
+    // !split 7 @user
     const splitMatch = content.match(/^!?split\s+(\d+)\s+<@!?(\d+)>$/i);
     if (splitMatch) {
       const raffle = getRaffle(message.guild.id, message.channel.id);
@@ -970,7 +704,9 @@ client.on("interactionCreate", async (interaction) => {
       return message.channel.send(lines.join("\n")).catch(() => {});
     }
 
-    // -------------------- FREE --------------------
+    // -------------------- FREE (unclaim) --------------------
+    // free          => frees all your slots
+    // free 7        => (mods) frees a specific slot
     const freeMatch = content.match(/^free(?:\s+(\d+))?$/i);
     if (freeMatch) {
       const raffle = getRaffle(message.guild.id, message.channel.id);
@@ -1007,7 +743,7 @@ client.on("interactionCreate", async (interaction) => {
       return message.reply(`🧹 Slot **#${numArg}** is now available.`).catch(() => {});
     }
 
-    // -------------------- REST --------------------
+    // -------------------- REST (claim all remaining slots) --------------------
     if (/^rest$/i.test(content)) {
       const raffle = getRaffle(message.guild.id, message.channel.id);
       if (!raffle.active || !raffle.max) return message.reply("No active raffle here.").catch(() => {});
@@ -1036,10 +772,9 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
-    // -------------------- CLAIM NUMBERS --------------------
+    // -------------------- CLAIM NUMBERS (type numbers) --------------------
     const nums = content.match(/\d+/g)?.map((n) => Number(n)) ?? [];
-    const looksLikeNumberClaim =
-      nums.length > 0 && content.replace(/[0-9,\s]/g, "") === "";
+    const looksLikeNumberClaim = nums.length > 0 && content.replace(/[0-9,\s]/g, "") === "";
 
     if (looksLikeNumberClaim) {
       const raffle = getRaffle(message.guild.id, message.channel.id);
@@ -1055,6 +790,7 @@ client.on("interactionCreate", async (interaction) => {
         const res = getReservation(mainKey, message.author.id);
         const freeMode = isFreeRaffle(raffle);
 
+        // Free raffle: 1 per person unless reservation exists
         const alreadyCount = countUserClaims(raffle, message.author.id);
         if (freeMode && alreadyCount >= 1 && !res) {
           await message.reply("This is a **FREE** raffle: you can only claim **1** slot. Use `free` to change it.").catch(() => {});
@@ -1139,4 +875,221 @@ client.on("interactionCreate", async (interaction) => {
   }
 });
 
+// -------------------- Interactions (buttons + slash commands) --------------------
+client.on("interactionCreate", async (interaction) => {
+  try {
+    // ---------- Buttons ----------
+    if (interaction.isButton()) {
+      const id = interaction.customId;
 
+      // Giveaway join button
+      if (id.startsWith("giveaway:enter:")) {
+        ensureGiveawayData();
+
+        const messageId = id.split(":")[2];
+        const g = data.giveaways?.[messageId];
+
+        if (!g) return interaction.reply({ content: "❌ This giveaway no longer exists.", ephemeral: true });
+        if (g.ended) return interaction.reply({ content: "❌ This giveaway has ended.", ephemeral: true });
+
+        if (!Array.isArray(g.participants)) g.participants = [];
+        if (g.participants.includes(interaction.user.id)) {
+          return interaction.reply({ content: "✅ You’re already entered!", ephemeral: true });
+        }
+
+        g.participants.push(interaction.user.id);
+        data.giveaways[messageId] = g;
+        saveData(data);
+
+        return interaction.reply({ content: `✅ Entered! Entries: **${g.participants.length}**`, ephemeral: true });
+      }
+
+      // Self-role buttons
+      if (id.startsWith("selfrole:")) {
+        const roleId = id.split(":")[1];
+
+        if (!data.selfRoles?.includes(roleId)) {
+          return interaction.reply({ content: "❌ That role is no longer self-assignable.", ephemeral: true });
+        }
+
+        const role = interaction.guild.roles.cache.get(roleId);
+        if (!role) return interaction.reply({ content: "❌ Role not found.", ephemeral: true });
+
+        const me = interaction.guild.members.me;
+        if (!me?.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
+          return interaction.reply({ content: "❌ I need **Manage Roles** permission.", ephemeral: true });
+        }
+
+        const member = await interaction.guild.members.fetch(interaction.user.id);
+        const already = member.roles.cache.has(roleId);
+
+        try {
+          if (already) await member.roles.remove(role);
+          else await member.roles.add(role);
+
+          return interaction.reply({
+            content: `${already ? "Removed" : "Added"} ${role} ${already ? "from" : "to"} you.`,
+            ephemeral: true
+          });
+        } catch {
+          return interaction.reply({
+            content: "❌ I couldn’t change that role. Check my role position.",
+            ephemeral: true
+          });
+        }
+      }
+
+      return;
+    }
+
+    // ---------- Slash Commands ----------
+    if (!interaction.isChatInputCommand()) return;
+
+    const isMod = interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageGuild);
+
+    // ---------- /giveaway ----------
+    if (interaction.commandName === "giveaway") {
+      if (!isMod) return interaction.reply({ content: "❌ Mods only.", ephemeral: true });
+
+      ensureGiveawayData();
+      const sub = interaction.options.getSubcommand();
+
+      if (sub === "start") {
+        const prize = interaction.options.getString("prize", true);
+        const durationStr = interaction.options.getString("duration", true);
+        const winners = interaction.options.getInteger("winners", true);
+
+        const ms = parseDurationToMs(durationStr);
+        if (!ms) return interaction.reply({ content: "❌ Duration must be `10m`, `2h`, or `1d`.", ephemeral: true });
+        if (winners < 1 || winners > 50) return interaction.reply({ content: "❌ Winners must be 1–50.", ephemeral: true });
+
+        const endsAt = Date.now() + ms;
+
+        const embed = new EmbedBuilder()
+          .setTitle("🎉 Giveaway Started")
+          .setDescription(
+            `**Prize:** ${prize}\n` +
+            `**Winners:** ${winners}\n` +
+            `**Ends:** <t:${Math.floor(endsAt / 1000)}:R>\n\n` +
+            `Click the button below to enter!`
+          )
+          .setTimestamp();
+
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("giveaway:enter:pending")
+            .setLabel("Join Giveaway")
+            .setStyle(ButtonStyle.Success)
+        );
+
+        const gwChannelId = String(config.giveawayChannelId || "").trim();
+        const gwChannel = gwChannelId ? await interaction.guild.channels.fetch(gwChannelId).catch(() => null) : null;
+
+        if (!gwChannel || !gwChannel.isTextBased()) {
+          return interaction.reply({ content: "❌ Giveaway channel not found. Check config.giveawayChannelId.", ephemeral: true });
+        }
+
+        const msg = await gwChannel.send({ embeds: [embed], components: [row] });
+
+        const row2 = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`giveaway:enter:${msg.id}`)
+            .setLabel("Join Giveaway")
+            .setStyle(ButtonStyle.Success)
+        );
+        await msg.edit({ components: [row2] }).catch(() => {});
+
+        data.giveaways[msg.id] = {
+          guildId: interaction.guildId,
+          channelId: gwChannel.id,
+          prize,
+          winners,
+          endsAt,
+          startedAt: Date.now(),
+          ended: false,
+          participants: [],
+          hostId: interaction.user.id,
+        };
+        saveData(data);
+
+        return interaction.reply({ content: `✅ Giveaway started in <#${gwChannel.id}> (ID: \`${msg.id}\`)`, ephemeral: true });
+      }
+
+      if (sub === "end") {
+        const messageId = interaction.options.getString("messageid", true);
+        const result = await endGiveawayByMessageId(client, messageId).catch(() => ({ ok: false, reason: "Failed." }));
+        if (!result.ok) return interaction.reply({ content: `❌ ${result.reason}`, ephemeral: true });
+        return interaction.reply({ content: "✅ Giveaway ended.", ephemeral: true });
+      }
+
+      if (sub === "reroll") {
+        const messageId = interaction.options.getString("messageid", true);
+        if (!data.giveaways?.[messageId]) return interaction.reply({ content: "❌ Giveaway not found.", ephemeral: true });
+
+        const result = await endGiveawayByMessageId(client, messageId, { reroll: true }).catch(() => ({ ok: false, reason: "Failed." }));
+        if (!result.ok) return interaction.reply({ content: `❌ ${result.reason}`, ephemeral: true });
+        return interaction.reply({ content: "✅ Rerolled winners.", ephemeral: true });
+      }
+    }
+
+    // ---------- /roll ----------
+    if (interaction.commandName === "roll") {
+      const sides = Number(interaction.options.getString("die", true));
+      const result = randInt(1, sides);
+
+      const raffle = getRaffle(interaction.guildId, interaction.channelId);
+
+      if (raffle?.max === sides && raffle.max > 0) {
+        const owners = raffle.claims[String(result)];
+        const winnerUserId = owners?.[0] || null;
+
+        const embed = new EmbedBuilder()
+          .setTitle("🎲 Raffle draw")
+          .setDescription(
+            winnerUserId
+              ? `Die: **d${sides}**\nWinning number: **#${result}**\nWinner: <@${winnerUserId}> 🎉`
+              : `Die: **d${sides}**\nWinning number: **#${result}**\nWinner: _(unclaimed)_ 😬`
+          )
+          .setTimestamp();
+
+        return interaction.reply({
+          content: winnerUserId ? `<@${winnerUserId}>` : "",
+          embeds: [embed],
+        });
+      }
+
+      const embed = new EmbedBuilder()
+        .setTitle("🎲 Roll")
+        .setDescription(`Die: **d${sides}**\nResult: **${result}**`)
+        .setTimestamp();
+
+      return interaction.reply({ embeds: [embed] });
+    }
+
+    // NOTE:
+    // Your other slash commands (/level, /leaderboard, /stats, /xpreset, /givexp)
+    // are deployed via deploy-commands.js. If you already had handlers elsewhere, paste them here.
+    // If you DON'T have them yet, tell me and I’ll drop in the handlers too.
+
+  } catch (err) {
+    console.error("interactionCreate error:", err);
+    try {
+      if (interaction?.isRepliable?.()) {
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({ content: "❌ Something went wrong.", ephemeral: true });
+        } else {
+          await interaction.reply({ content: "❌ Something went wrong.", ephemeral: true });
+        }
+      }
+    } catch {}
+  }
+});
+
+// -------------------- Login --------------------
+const token = String(process.env.DISCORD_TOKEN || config.token || "").trim();
+if (!token) {
+  console.error("❌ No Discord token found (DISCORD_TOKEN env or config.json token).");
+  process.exit(1);
+}
+
+client.login(token).catch(console.error);
