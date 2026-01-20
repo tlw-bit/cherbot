@@ -28,15 +28,19 @@
   "xpAllowedChannelIds": [],
   "xpBlockedChannelIds": []
 {
+
 {
   "raffleCreateChannelId": "1459631522775564538",
   "miniCreateChannelId": "1463113934180581473",
   "gambaRoleId": "1456957921005932585",
-  "miniClaimWindowMinutes": 5,
-  "miniDefaultSlots": 6
+
   "giveawayChannelId": "1456954533065392128",
-  "giveawayWinnerChannelId": "1459609291710398519"
+  "giveawayWinnerChannelId": "1459609291710398519",
+
+  "miniClaimWindowMinutes": 10,
+  "miniDefaultSlots": 6
 }
+
 
 
 
