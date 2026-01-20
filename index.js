@@ -100,6 +100,10 @@ function gambaMention() {
   const rid = String(config.gambaRoleId || "").trim();
   return rid ? `<@&${rid}>` : "";
 }
+function giveawayMention() {
+  const rid = String(config.giveawayRoleId || "").trim();
+  return rid ? `<@&${rid}>` : "";
+}
 
 function shouldAwardXp(channelId) {
   const allowed = Array.isArray(config.xpAllowedChannelIds) ? config.xpAllowedChannelIds.map(String) : [];
@@ -1230,6 +1234,7 @@ if (!token) {
 }
 
 client.login(token).catch(console.error);
+
 
 
 
