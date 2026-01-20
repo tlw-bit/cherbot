@@ -108,6 +108,17 @@ function shouldAwardXp(channelId) {
   if (allowed.length > 0 && !allowed.includes(String(channelId))) return false;
   return true;
 }
+function normalizeUserId(value) {
+  if (!value) return null;
+
+  // If already a pure ID
+  const s = String(value);
+  if (/^\d{15,}$/.test(s)) return s;
+
+  // If stored as a mention like <@123> or <@!123>
+  const m = s.match(/\d{15,}/);
+  return m ? m[0] : null;
+}
 
 // -------------------- Level roles helpers --------------------
 function getLevelRoleIdsSorted() {
@@ -597,45 +608,77 @@ client.on("messageCreate", async (message) => {
     }
 
     // -------------------- MINI DRAW (inside mini thread) --------------------
-    if (/^!minidraw$/i.test(content)) {
-      if (!isMod) return message.reply("❌ Mods only.").catch(() => {});
-      const meta = data.miniThreads?.[message.channel.id];
-      if (!meta) return message.reply("This isn’t a registered mini thread.").catch(() => {});
+// -------------------- MINI DRAW (inside mini thread) --------------------
+if (/^!minidraw$/i.test(content)) {
+  if (!isMod) return message.reply("❌ Mods only.").catch(() => {});
 
-      const miniRaffle = getRaffle(message.guild.id, message.channel.id);
-      const claimedEntries = Object.entries(miniRaffle.claims || {}).filter(([, owners]) => Array.isArray(owners) && owners.length > 0);
-      if (claimedEntries.length === 0) return message.reply("No one has claimed any mini slots.").catch(() => {});
+  const meta = data.miniThreads?.[message.channel.id];
+  if (!meta) return message.reply("This isn’t a registered mini thread.").catch(() => {});
 
-      const pick = claimedEntries[randInt(0, claimedEntries.length - 1)];
-      const winningNumber = pick[0];
-      const winnerId = pick[1]?.[0];
-      if (!winnerId) return message.reply("Couldn’t pick a winner.").catch(() => {});
+  const miniRaffle = getRaffle(message.guild.id, message.channel.id);
 
-      const minutes = Number(config.miniClaimWindowMinutes ?? 10);
-      const tickets = Number(meta.tickets || 1);
-      const mainKey = meta.mainKey;
+  // Build a pool of (slotNumber, ownerId) entries
+  const pool = [];
+  for (const [slot, owners] of Object.entries(miniRaffle.claims || {})) {
+    if (!Array.isArray(owners) || owners.length === 0) continue;
 
-      const mainThreadId = mainKey.split(":")[1];
-      const mainThread = await message.guild.channels.fetch(mainThreadId).catch(() => null);
-      if (!mainThread || !mainThread.isTextBased()) return message.reply("Main raffle thread not found.").catch(() => {});
-
-      setReservation(mainKey, winnerId, tickets, minutes);
-
-      const mainRaffle = getRaffle(message.guild.id, mainThread.id);
-      const left = computeMainsLeft(mainRaffle, mainKey);
-
-      const ping = gambaMention();
-      await mainThread.send(
-        `🏆 **Mini winner:** <@${winnerId}> (won mini slot **#${winningNumber}**)\n` +
-        `🎟️ Claim **${tickets}** main number(s) in this thread.\n` +
-        `⏳ You have **${minutes} minutes**. Type numbers like: \`2 5 6\`\n` +
-        `📌 **${left} MAINS LEFT**\n` +
-        `${ping ? ping : ""}`.trim()
-      ).catch(() => {});
-
-      await message.reply(`🎉 Winner: <@${winnerId}> (slot #${winningNumber}). Tagged in the main thread.`).catch(() => {});
-      return;
+    // Support splits: each owner gets an entry so they have equal chance on that slot
+    for (const raw of owners) {
+      const uid = normalizeUserId(raw);
+      if (uid) pool.push({ slot, uid });
     }
+  }
+
+  if (pool.length === 0) {
+    return message.reply("No one has claimed any mini slots.").catch(() => {});
+  }
+
+  // Pick random winner entry
+  const picked = pool[randInt(0, pool.length - 1)];
+  const winningNumber = picked.slot;
+  const winnerId = picked.uid;
+
+  // Validate winnerId again, just in case
+  if (!winnerId) return message.reply("Couldn’t pick a winner.").catch(() => {});
+
+  const minutes = Number(config.miniClaimWindowMinutes ?? 10);
+  const tickets = Number(meta.tickets || 1);
+  const mainKey = meta.mainKey;
+
+  const mainThreadId = mainKey.split(":")[1];
+  const mainThread = await message.guild.channels.fetch(mainThreadId).catch(() => null);
+  if (!mainThread || !mainThread.isTextBased()) {
+    return message.reply("Main raffle thread not found.").catch(() => {});
+  }
+
+  setReservation(mainKey, winnerId, tickets, minutes);
+
+  const mainRaffle = getRaffle(message.guild.id, mainThread.id);
+  const left = computeMainsLeft(mainRaffle, mainKey);
+
+  const ping = gambaMention();
+
+  const contentToSend =
+    `🏆 **Mini winner:** <@${winnerId}> (won mini slot **#${winningNumber}**)\n` +
+    `🎟️ Claim **${tickets}** main number(s) in this thread.\n` +
+    `⏳ You have **${minutes} minutes**. Type numbers like: \`2 5 6\`\n` +
+    `📌 **${left} MAINS LEFT**\n` +
+    `${ping ? ping : ""}`.trim();
+
+  // Force user mention to actually ping
+  await mainThread.send({
+    content: contentToSend,
+    allowedMentions: { users: [winnerId] },
+  }).catch(() => {});
+
+  await message.reply({
+    content: `🎉 Winner: <@${winnerId}> (slot #${winningNumber}). Tagged in the main thread.`,
+    allowedMentions: { users: [winnerId] },
+  }).catch(() => {});
+
+  return;
+}
+
 
     // -------------------- SPLIT (paid raffles only) --------------------
     // !split 7 @user
@@ -802,15 +845,34 @@ client.on("messageCreate", async (message) => {
 
         const claimed = [];
         const taken = [];
+for (const n of toTry) {
+  const key = String(n);
+  const owners = raffle.claims[key];
 
-        for (const n of toTry) {
-          const key = String(n);
-          const owners = raffle.claims[key];
-          if (owners && owners.length > 0) taken.push(n);
-          else {
-            raffle.claims[key] = [message.author.id];
-            claimed.push(n);
-          }
+  // If empty, claim it
+  if (!owners || owners.length === 0) {
+    raffle.claims[key] = [message.author.id];
+    claimed.push(n);
+    continue;
+  }
+
+  // If already yours, ignore it (prevents duplicates)
+  if (owners.includes(message.author.id)) {
+    continue;
+  }
+
+  // Allow split for paid raffles only (you already enforce this elsewhere)
+  // If you want to allow split in minis too, leave this enabled.
+  if (owners.length === 1 && !isFreeRaffle(raffle)) {
+    raffle.claims[key] = [owners[0], message.author.id];
+    claimed.push(n);
+    continue;
+  }
+
+  // Otherwise it's taken
+  taken.push(n);
+}
+
         }
 
         if (!claimed.length) {
@@ -1093,3 +1155,4 @@ if (!token) {
 }
 
 client.login(token).catch(console.error);
+
