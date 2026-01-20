@@ -1095,38 +1095,113 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     // ---------- /roll ----------
-    if (interaction.commandName === "roll") {
-      const sides = Number(interaction.options.getString("die", true));
-      const result = randInt(1, sides);
+  // ---------- /roll ----------
+if (interaction.commandName === "roll") {
+  const sides = Number(interaction.options.getString("die", true));
+  const result = randInt(1, sides);
 
-      const raffle = getRaffle(interaction.guildId, interaction.channelId);
+  // The raffle object for THIS channel (thread or normal channel)
+  const raffle = getRaffle(interaction.guildId, interaction.channelId);
 
-      if (raffle?.max === sides && raffle.max > 0) {
-        const owners = raffle.claims[String(result)];
-        const winnerUserId = owners?.[0] || null;
+  // If this channel is a MINI thread we created, we can "transfer" the winner to the main thread
+  const meta = data.miniThreads?.[interaction.channelId] || null;
 
-        const embed = new EmbedBuilder()
-          .setTitle("🎲 Raffle draw")
-          .setDescription(
-            winnerUserId
-              ? `Die: **d${sides}**\nWinning number: **#${result}**\nWinner: <@${winnerUserId}> 🎉`
-              : `Die: **d${sides}**\nWinning number: **#${result}**\nWinner: _(unclaimed)_ 😬`
-          )
-          .setTimestamp();
+  // Helper to pick a winner from the rolled slot (supports split)
+  const owners = raffle.claims?.[String(result)] || [];
+  const normalizedOwners = Array.isArray(owners)
+    ? owners.map(normalizeUserId).filter(Boolean)
+    : [];
 
-        return interaction.reply({
-          content: winnerUserId ? `<@${winnerUserId}>` : "",
-          embeds: [embed],
-        });
-      }
+  // If in a mini thread AND the die matches the mini size, do mini transfer logic
+  if (meta && raffle?.max === sides && raffle.max > 0) {
+    const winnerId = normalizedOwners.length
+      ? normalizedOwners[randInt(0, normalizedOwners.length - 1)]
+      : null;
 
-      const embed = new EmbedBuilder()
-        .setTitle("🎲 Roll")
-        .setDescription(`Die: **d${sides}**\nResult: **${result}**`)
-        .setTimestamp();
+    // Always show the roll result in the mini thread
+    const embed = new EmbedBuilder()
+      .setTitle("🎲 Mini draw")
+      .setDescription(
+        winnerId
+          ? `Die: **d${sides}**\nWinning number: **#${result}**\nWinner: <@${winnerId}> 🏆`
+          : `Die: **d${sides}**\nWinning number: **#${result}**\nWinner: _(unclaimed)_ 😬`
+      )
+      .setTimestamp();
 
-      return interaction.reply({ embeds: [embed] });
+    // Reply first so mods see the outcome even if main-thread posting fails
+    await interaction.reply({
+      content: winnerId ? `<@${winnerId}>` : "",
+      embeds: [embed],
+      allowedMentions: winnerId ? { users: [winnerId] } : undefined,
+    }).catch(() => {});
+
+    // If unclaimed, we can't reserve main tickets
+    if (!winnerId) return;
+
+    // Post claim-window message into the main raffle thread
+    const minutes = Number(config.miniClaimWindowMinutes ?? 10);
+    const tickets = Number(meta.tickets || 1);
+    const mainKey = meta.mainKey;
+
+    const mainThreadId = mainKey.split(":")[1];
+    const mainThread = await interaction.guild.channels.fetch(mainThreadId).catch(() => null);
+    if (!mainThread || !mainThread.isTextBased()) return;
+
+    // If thread is archived, try to unarchive (best effort)
+    if (mainThread.isThread?.() && mainThread.archived) {
+      await mainThread.setArchived(false).catch(() => {});
     }
+
+    setReservation(mainKey, winnerId, tickets, minutes);
+
+    const mainRaffle = getRaffle(interaction.guildId, mainThread.id);
+    const left = computeMainsLeft(mainRaffle, mainKey);
+    const ping = gambaMention();
+
+    const msg =
+      `🏆 **Mini winner:** <@${winnerId}> (won mini slot **#${result}**)\n` +
+      `🎟️ Claim **${tickets}** main number(s) in this thread.\n` +
+      `⏳ You have **${minutes} minutes**. Type numbers like: \`2 5 6\`\n` +
+      `📌 **${left} MAINS LEFT**\n` +
+      `${ping ? ping : ""}`.trim();
+
+    await mainThread.send({
+      content: msg,
+      allowedMentions: { users: [winnerId] },
+    }).catch(() => {});
+
+    return;
+  }
+
+  // Otherwise: normal raffle draw logic (main raffle in thread, etc.)
+  if (raffle?.max === sides && raffle.max > 0) {
+    const winnerUserId = normalizedOwners.length ? normalizedOwners[0] : null;
+
+    const embed = new EmbedBuilder()
+      .setTitle("🎲 Raffle draw")
+      .setDescription(
+        winnerUserId
+          ? `Die: **d${sides}**\nWinning number: **#${result}**\nWinner: <@${winnerUserId}> 🎉`
+          : `Die: **d${sides}**\nWinning number: **#${result}**\nWinner: _(unclaimed)_ 😬`
+      )
+      .setTimestamp();
+
+    return interaction.reply({
+      content: winnerUserId ? `<@${winnerUserId}>` : "",
+      embeds: [embed],
+      allowedMentions: winnerUserId ? { users: [winnerUserId] } : undefined,
+    });
+  }
+
+  // Plain roll (not tied to a raffle)
+  const embed = new EmbedBuilder()
+    .setTitle("🎲 Roll")
+    .setDescription(`Die: **d${sides}**\nResult: **${result}**`)
+    .setTimestamp();
+
+  return interaction.reply({ embeds: [embed] });
+}
+
 
     // NOTE:
     // Your other slash commands (/level, /leaderboard, /stats, /xpreset, /givexp)
@@ -1155,5 +1230,6 @@ if (!token) {
 }
 
 client.login(token).catch(console.error);
+
 
 
