@@ -164,7 +164,13 @@ async function endGiveawayByMessageId(guild, messageId, { reroll = false } = {})
 
   const embed = new EmbedBuilder()
     .setTitle(reroll ? "🔁 Giveaway Reroll" : "🏁 Giveaway Ended")
-    .setDescription(`**Prize:** ${prize}\n**Winners:** ${winnerText}`)
+   .setDescription(
+  `**Prize:** ${prize}\n` +
+  `**Winners:** ${winners}\n` +
+  `**Ends:** <t:${Math.floor(endsAt / 1000)}:R>\n` +
+  `**Entries:** **0**\n\n` +
+  `Click the button below to enter!`
+)
     .setTimestamp();
 
   // Announce winners in WINNER channel (fallback to giveaway channel)
@@ -1418,4 +1424,5 @@ console.log("Bot starting...");
 console.log("Token present?", Boolean(token), "Length:", token.length);
 
 client.login(token).catch(console.error);
+
 
