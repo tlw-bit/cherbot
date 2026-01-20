@@ -945,16 +945,74 @@ if (looksLikeNumberClaim) {
 client.on("interactionCreate", async (interaction) => {
   try {
     // ---------- Buttons ----------
-    if (interaction.isButton()) {
-      const id = interaction.customId;
+   if (interaction.isButton()) {
+  const id = interaction.customId;
 
-      // Giveaway join button
-      if (id.startsWith("giveaway:enter:")) {
-        ensureGiveawayData();
+  // ✅ ACK immediately so Discord never times out
+  await interaction.deferReply({ ephemeral: true }).catch(() => {});
 
-        const messageId = id.split(":")[2];
-        const g = data.giveaways?.[messageId];
+  // Giveaway join button
+  if (id.startsWith("giveaway:enter:")) {
+    ensureGiveawayData();
 
+    const messageId = id.split(":")[2];
+    const g = data.giveaways?.[messageId];
+
+    if (!g) return interaction.editReply({ content: "❌ This giveaway no longer exists." });
+    if (g.ended) return interaction.editReply({ content: "❌ This giveaway has ended." });
+
+    if (!Array.isArray(g.participants)) g.participants = [];
+    if (g.participants.includes(interaction.user.id)) {
+      return interaction.editReply({ content: "✅ You’re already entered!" });
+    }
+
+    g.participants.push(interaction.user.id);
+    data.giveaways[messageId] = g;
+    saveData(data);
+
+    return interaction.editReply({ content: `✅ Entered! Entries: **${g.participants.length}**` });
+  }
+
+  // Self-role buttons
+  if (id.startsWith("selfrole:")) {
+    const roleId = id.split(":")[1];
+
+    if (!data.selfRoles?.includes(roleId)) {
+      return interaction.editReply({ content: "❌ That role is no longer self-assignable." });
+    }
+
+    const role = interaction.guild.roles.cache.get(roleId);
+    if (!role) return interaction.editReply({ content: "❌ Role not found." });
+
+    const me = interaction.guild.members.me;
+    if (!me?.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
+      return interaction.editReply({ content: "❌ I need **Manage Roles** permission." });
+    }
+
+    const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+    if (!member) return interaction.editReply({ content: "❌ Couldn’t fetch your member info." });
+
+    const already = member.roles.cache.has(roleId);
+
+    try {
+      if (already) await member.roles.remove(role);
+      else await member.roles.add(role);
+
+      return interaction.editReply({
+        content: `${already ? "Removed" : "Added"} ${role} ${already ? "from" : "to"} you.`
+      });
+    } catch {
+      return interaction.editReply({
+        content: "❌ I couldn’t change that role. Check my role position."
+      });
+    }
+  }
+
+  // If it wasn't a known button
+  return interaction.editReply({ content: "❌ Unknown button." }).catch(() => {});
+}
+
+deferReply({ ephemeral: true }
         if (!g) return interaction.reply({ content: "❌ This giveaway no longer exists.", ephemeral: true });
         if (g.ended) return interaction.reply({ content: "❌ This giveaway has ended.", ephemeral: true });
 
@@ -1190,6 +1248,7 @@ if (!token) {
 }
 
 client.login(token).catch(console.error);
+
 
 
 
