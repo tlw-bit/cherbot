@@ -7,29 +7,27 @@
   "xpMax": 20,
   "cooldownSeconds": 60,
 
-  "logChannelId": "YOUR_LOG_CHANNEL_ID",
-  "levelUpChannelId": "YOUR_LEVELUP_CHANNEL_ID",
+  "logChannelId": "1456955298597175391",
+  "levelUpChannelId": "1456967580299559066",
 
-  "winnersChannelId": "YOUR_WINNERS_CHANNEL_ID",
+  "winnersChannelId": "1459609291710398519",
 
   "levelRoles": {
-    "2": "ROLE_ID",
-    "5": "ROLE_ID",
-    "8": "ROLE_ID",
-    "12": "ROLE_ID",
-    "16": "ROLE_ID",
-    "20": "ROLE_ID",
-    "25": "ROLE_ID",
-    "30": "ROLE_ID",
-    "40": "ROLE_ID",
-    "50": "ROLE_ID"
+    "2": "1462479094859038773",
+    "5": "1462479797304295535",
+    "8": "1462480092910587925",
+    "12": "1462480383328129075",
+    "16": "1462480917322010715",
+    "20": "1462480684496060728",
+    "25": "1462481138546381127",
+    "30": "1462481539391684760",
+    "40": "1462478268199600129",
+    "50": "1462478548961857844"
   },
 
   "xpAllowedChannelIds": [],
-  "xpBlockedChannelIds": []
-{
+  "xpBlockedChannelIds": [],
 
-{
   "raffleCreateChannelId": "1459631522775564538",
   "miniCreateChannelId": "1463113934180581473",
   "gambaRoleId": "1456957921005932585",
@@ -37,12 +35,6 @@
   "giveawayChannelId": "1456954533065392128",
   "giveawayWinnerChannelId": "1459609291710398519",
 
-  "miniClaimWindowMinutes": 10,
+  "miniClaimWindowMinutes": 5,
   "miniDefaultSlots": 6
 }
-
-
-
-
-
-
