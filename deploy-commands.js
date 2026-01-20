@@ -28,6 +28,22 @@ const commands = [
     .setName("level")
     .setDescription("View your level or another user's level")
     .addUserOption(opt => opt.setName("user").setDescription("User to check").setRequired(false)),
+  new SlashCommandBuilder()
+    .setName("roll")
+    .setDescription("Roll a die (d4, d6, d8, d10, d20, d50)")
+    .addStringOption(opt =>
+      opt.setName("die")
+        .setDescription("Which die?")
+        .setRequired(true)
+        .addChoices(
+          { name: "d4", value: "4" },
+          { name: "d6", value: "6" },
+          { name: "d8", value: "8" },
+          { name: "d10", value: "10" },
+          { name: "d20", value: "20" },
+          { name: "d50", value: "50" }
+        )
+    ),
 
   new SlashCommandBuilder()
     .setName("leaderboard")
@@ -87,3 +103,4 @@ const rest = new REST({ version: "10" }).setToken(token);
     console.error("❌ Failed to deploy commands:", err);
   }
 })();
+
