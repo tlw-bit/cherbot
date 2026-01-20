@@ -1014,7 +1014,13 @@ client.on("interactionCreate", async (interaction) => {
     const isMod = interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageGuild);
 
     // ---------- /giveaway ----------
- if (interaction.commandName === "giveaway") {
+if (interaction.commandName === "giveaway") {
+  if (!isMod) return interaction.reply({ content: "❌ Mods only.", ephemeral: true });
+
+  // ✅ ACK immediately so Discord doesn't time out
+  await interaction.deferReply({ ephemeral: true }).catch(() => {});
+
+  ensureGiveawayData();
   const sub = interaction.options.getSubcommand();
 
   // ---------- START ----------
@@ -1184,6 +1190,7 @@ if (!token) {
 }
 
 client.login(token).catch(console.error);
+
 
 
 
