@@ -1076,45 +1076,76 @@ client.on("interactionCreate", async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
 
     const isMod = interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageGuild);
+// ---------- /assign ----------
+if (interaction.commandName === "assign") {
+  const isMod = interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageGuild);
+  if (!isMod) return interaction.reply({ content: "❌ Mods only.", ephemeral: true });
 
-       // ---------- /assign ----------
-    if (interaction.commandName === "assign") {
-      const isMod = interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageGuild);
-      if (!isMod) return interaction.reply({ content: "❌ Mods only.", ephemeral: true });
+  const slot = interaction.options.getInteger("slot", true);
+  const user = interaction.options.getUser("user", true);
+  const user2 = interaction.options.getUser("user2", false); // optional
 
-      const slot = interaction.options.getInteger("slot", true);
-      const user = interaction.options.getUser("user", true);
-      const user2 = interaction.options.getUser("user2", false); // ✅ optional
+  const raffle = getRaffle(interaction.guildId, interaction.channelId);
+  if (!raffle?.max || raffle.max <= 0) {
+    return interaction.reply({ content: "❌ No raffle found in this channel/thread.", ephemeral: true });
+  }
 
-      const raffle = getRaffle(interaction.guildId, interaction.channelId);
-      if (!raffle?.max || raffle.max <= 0) {
-        return interaction.reply({ content: "❌ No raffle found in this channel/thread.", ephemeral: true });
-      }
+  if (slot < 1 || slot > raffle.max) {
+    return interaction.reply({ content: `❌ Slot must be between 1 and ${raffle.max}.`, ephemeral: true });
+  }
 
-      if (slot < 1 || slot > raffle.max) {
-        return interaction.reply({ content: `❌ Slot must be between 1 and ${raffle.max}.`, ephemeral: true });
-      }
+  const mainKey = raffleKey(interaction.guildId, interaction.channelId);
+  const freeMode = isFreeRaffle(raffle);
 
-      // Build owners list (split if user2 provided)
-      const owners = [user.id];
-      if (user2 && user2.id !== user.id) owners.push(user2.id);
+  // Block split on FREE raffles (match your normal rules)
+  if (freeMode && user2) {
+    return interaction.reply({
+      content: "❌ Split assignment is only allowed on **paid** raffles.",
+      ephemeral: true,
+    });
+  }
 
-      // Force-assign (overwrites existing owners)
-      raffle.claims[String(slot)] = owners;
-      saveData(data);
+  // --- Reservation protection: refuse overwriting a slot owned by someone with an active mini reservation ---
+  const currentOwnersRaw = raffle.claims?.[String(slot)] || [];
+  const currentOwners = Array.isArray(currentOwnersRaw)
+    ? currentOwnersRaw.map(normalizeUserId).filter(Boolean)
+    : [];
 
-      // Update board (mainKey enables Ⓜ️ markings if applicable)
-      const mainKey = raffleKey(interaction.guildId, interaction.channelId);
-      if (interaction.channel?.isTextBased?.()) {
-        await postOrUpdateBoard(interaction.channel, raffle, mainKey);
-      }
-
-      const who = owners.map((id) => `<@${id}>`).join(" + ");
+  if (currentOwners.length) {
+    // If ANY current owner has an active reservation window, don't allow overwrite
+    const lockedOwners = currentOwners.filter((uid) => !!getReservation(mainKey, uid));
+    if (lockedOwners.length) {
+      const who = lockedOwners.map((id) => `<@${id}>`).join(" + ");
       return interaction.reply({
-        content: `✅ Assigned slot **#${slot}** to ${who}.`,
-        allowedMentions: { users: owners },
+        content:
+          `⛔ Slot **#${slot}** is protected right now.\n` +
+          `${who} has an active **mini claim window**.\n` +
+          `Wait for it to expire (or have them finish claiming), then try again.`,
+        ephemeral: true,
       });
     }
+  }
+
+  // Build owners list (split if allowed and user2 is different)
+  const owners = [user.id];
+  if (!freeMode && user2 && user2.id !== user.id) owners.push(user2.id);
+
+  // Force-assign (overwrites existing owners if not protected)
+  raffle.claims[String(slot)] = owners;
+  saveData(data);
+
+  // Update board (mainKey enables Ⓜ️ markings if applicable)
+  if (interaction.channel?.isTextBased?.()) {
+    await postOrUpdateBoard(interaction.channel, raffle, mainKey);
+  }
+
+  const who = owners.map((id) => `<@${id}>`).join(" + ");
+  return interaction.reply({
+    content: `✅ Assigned slot **#${slot}** to ${who}.`,
+    allowedMentions: { users: owners },
+  });
+}
+
 
 
     // ---------- /giveaway ----------
@@ -1254,6 +1285,83 @@ client.on("interactionCreate", async (interaction) => {
 
       return interaction.editReply({ content: "❌ Unknown subcommand." });
     }
+// ---------- /free ----------
+if (interaction.commandName === "free") {
+  const slot = interaction.options.getInteger("slot", false);
+  const isMod = interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageGuild);
+
+  const raffle = getRaffle(interaction.guildId, interaction.channelId);
+  if (!raffle?.max || raffle.max <= 0) {
+    return interaction.reply({ content: "❌ No raffle found in this channel/thread.", ephemeral: true });
+  }
+
+  const mainKey = raffleKey(interaction.guildId, interaction.channelId);
+
+  // --- MOD: free specific slot ---
+  if (slot !== null) {
+    if (!isMod) {
+      return interaction.reply({
+        content: "❌ Only mods can free a specific slot.",
+        ephemeral: true,
+      });
+    }
+
+    if (slot < 1 || slot > raffle.max) {
+      return interaction.reply({
+        content: `❌ Slot must be between 1 and ${raffle.max}.`,
+        ephemeral: true,
+      });
+    }
+
+    if (!raffle.claims[String(slot)] || raffle.claims[String(slot)].length === 0) {
+      return interaction.reply({
+        content: `ℹ️ Slot **#${slot}** is already available.`,
+        ephemeral: true,
+      });
+    }
+
+    delete raffle.claims[String(slot)];
+    saveData(data);
+
+    await postOrUpdateBoard(interaction.channel, raffle, mainKey);
+
+    return interaction.reply({
+      content: `🧹 Slot **#${slot}** is now available.`,
+    });
+  }
+
+  // --- USER: free all own slots ---
+  let freed = 0;
+
+  for (const [num, owners] of Object.entries(raffle.claims)) {
+    if (!Array.isArray(owners)) continue;
+
+    if (owners.includes(interaction.user.id)) {
+      const remaining = owners.filter((id) => id !== interaction.user.id);
+      if (remaining.length === 0) {
+        delete raffle.claims[num];
+      } else {
+        raffle.claims[num] = remaining;
+      }
+      freed++;
+    }
+  }
+
+  if (freed === 0) {
+    return interaction.reply({
+      content: "ℹ️ You don’t have any claimed slots to free.",
+      ephemeral: true,
+    });
+  }
+
+  saveData(data);
+  await postOrUpdateBoard(interaction.channel, raffle, mainKey);
+
+  return interaction.reply({
+    content: `🗑️ Freed your slot(s).`,
+    ephemeral: true,
+  });
+}
 
     // ---------- /roll ----------
     if (interaction.commandName === "roll") {
@@ -1368,4 +1476,5 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
+
 
