@@ -1,5 +1,5 @@
 {
-  "token": "SECRET",
+  "token": "",
   "guildId": "1456735416156819578",
   "clientId": "1457704762815287350",
 
@@ -38,5 +38,6 @@
   "miniClaimWindowMinutes": 5,
   "miniDefaultSlots": 6
 }
+
 
 
