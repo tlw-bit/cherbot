@@ -1020,81 +1020,63 @@ client.on("interactionCreate", async (interaction) => {
       ensureGiveawayData();
       const sub = interaction.options.getSubcommand();
 
-      if (sub === "start") {
-        const prize = interaction.options.getString("prize", true);
-        const durationStr = interaction.options.getString("duration", true);
-        const winners = interaction.options.getInteger("winners", true);
+if (sub === "start") {
+  const prize = interaction.options.getString("prize", true);
+  const durationStr = interaction.options.getString("duration", true);
+  const winners = interaction.options.getInteger("winners", true);
 
-        const ms = parseDurationToMs(durationStr);
-        if (!ms) return interaction.reply({ content: "❌ Duration must be `10m`, `2h`, or `1d`.", ephemeral: true });
-        if (winners < 1 || winners > 50) return interaction.reply({ content: "❌ Winners must be 1–50.", ephemeral: true });
+  const sponsorUser = interaction.options.getUser("sponsor", false);
+  const sponsorId = sponsorUser?.id || null;
 
-        const endsAt = Date.now() + ms;
+  // default ping = true unless explicitly set false
+  const pingOpt = interaction.options.getBoolean("ping", false);
+  const shouldPing = pingOpt === null ? true : Boolean(pingOpt);
 
-    const embed = new EmbedBuilder()
-  .setTitle("🎉 Giveaway Started")
-  .setDescription(
-    `**Prize:** ${prize}\n` +
-    `**Winners:** ${winners}\n` +
-    `**Ends:** <t:${Math.floor(endsAt / 1000)}:R>\n\n` +
-    `Click the button below to enter!`
-  )
-  .addFields(
-    {
-      name: "🧑‍💼 Hosted by",
-      value: `<@${interaction.user.id}>`,
-      inline: true,
-    },
-    sponsorId
-      ? {
-          name: "🎁 Sponsored by",
-          value: `<@${sponsorId}>`,
-          inline: true,
-        }
-      : null
-  )
-  .setTimestamp();
+  const ms = parseDurationToMs(durationStr);
+  if (!ms) return interaction.reply({ content: "❌ Duration must be `10m`, `2h`, or `1d`.", ephemeral: true });
+  if (winners < 1 || winners > 50) return interaction.reply({ content: "❌ Winners must be 1–50.", ephemeral: true });
 
+  const endsAt = Date.now() + ms;
 
-        const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setCustomId("giveaway:enter:pending")
-            .setLabel("Join Giveaway")
-            .setStyle(ButtonStyle.Success)
-        );
+  // ✅ Clean embed fields (no nulls)
+  const fields = [
+    { name: "🧑‍💼 Hosted by", value: `<@${interaction.user.id}>`, inline: true },
+  ];
+  if (sponsorId) fields.push({ name: "🎁 Sponsored by", value: `<@${sponsorId}>`, inline: true });
 
-        const gwChannelId = String(config.giveawayChannelId || "").trim();
-        const gwChannel = gwChannelId ? await interaction.guild.channels.fetch(gwChannelId).catch(() => null) : null;
+  const embed = new EmbedBuilder()
+    .setTitle("🎉 Giveaway Started")
+    .setDescription(
+      `**Prize:** ${prize}\n` +
+      `**Winners:** ${winners}\n` +
+      `**Ends:** <t:${Math.floor(endsAt / 1000)}:R>\n\n` +
+      `Click the button below to enter!`
+    )
+    .addFields(fields)
+    .setTimestamp();
 
-        if (!gwChannel || !gwChannel.isTextBased()) {
-          return interaction.reply({ content: "❌ Giveaway channel not found. Check config.giveawayChannelId.", ephemeral: true });
-        }
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("giveaway:enter:pending")
+      .setLabel("Join Giveaway")
+      .setStyle(ButtonStyle.Success)
+  );
 
-        const msg = await gwChannel.send({ embeds: [embed], components: [row] });
+  const gwChannelId = String(config.giveawayChannelId || "").trim();
+  const gwChannel = gwChannelId ? await interaction.guild.channels.fetch(gwChannelId).catch(() => null) : null;
 
-        const row2 = new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setCustomId(`giveaway:enter:${msg.id}`)
-            .setLabel("Join Giveaway")
-            .setStyle(ButtonStyle.Success)
-        );
-        await msg.edit({ components: [row2] }).catch(() => {});
+  if (!gwChannel || !gwChannel.isTextBased()) {
+    return interaction.reply({ content: "❌ Giveaway channel not found. Check config.giveawayChannelId.", ephemeral: true });
+  }
 
-        data.giveaways[msg.id] = {
-          guildId: interaction.guildId,
-          channelId: gwChannel.id,
-          prize,
-          winners,
-          endsAt,
-          startedAt: Date.now(),
-          ended: false,
-          participants: [],
-          hostId: interaction.user.id,
-        };
-        saveData(data);
+  const pingText = shouldPing ? giveawayMention() : "";
+  const sponsorPing = sponsorId ? `<@${sponsorId}>` : "";
+  const content = [pingText, sponsorPing].filter(Boolean).join(" ").trim();
 
-        return interaction.reply({ content: `✅ Giveaway started in <#${gwChannel.id}> (ID: \`${msg.id}\`)`, ephemeral: true });
-      }
+  const msg = await gwChannel.send({
+    content: content || undefined,
+    embeds: [embed],
+    components: [row],
 
       if (sub === "end") {
         const messageId = interaction.options.getString("messageid", true);
@@ -1249,6 +1231,7 @@ if (!token) {
 }
 
 client.login(token).catch(console.error);
+
 
 
 
