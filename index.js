@@ -570,7 +570,10 @@ if (!token) {
   console.error("❌ No Discord token found.");
   process.exit(1);
 }
+console.log("Bot starting...");
+console.log("Token present?", Boolean(token), "Length:", token.length);
 
 client.login(token).catch(console.error);
+
 
 
