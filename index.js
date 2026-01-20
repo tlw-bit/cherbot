@@ -339,12 +339,13 @@ async function postOrUpdateBoard(channel, raffle) {
     }
   }
 
-  const posted = await channel.send({ content: text }).catch(() => null);
-  if (posted) {
-    raffle.lastBoardMessageId = posted.id;
-    saveData(data);
-  }
-}
+const winnerCh = await guild.channels.fetch(config.giveawayWinnerChannelId).catch(() => null);
+const targetCh = (winnerCh && winnerCh.isTextBased()) ? winnerCh : channel;
+
+await targetCh.send({
+  content: winners.length ? winnerText : "",
+  embeds: [embed],
+}).catch(() => {});
 
 // -------------------- Mains left + reservations --------------------
 function getMainRaffleChannel(guild) {
@@ -1424,5 +1425,6 @@ console.log("Bot starting...");
 console.log("Token present?", Boolean(token), "Length:", token.length);
 
 client.login(token).catch(console.error);
+
 
 
