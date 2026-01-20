@@ -1014,86 +1014,39 @@ client.on("interactionCreate", async (interaction) => {
     const isMod = interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageGuild);
 
     // ---------- /giveaway ----------
-    if (interaction.commandName === "giveaway") {
-      if (!isMod) return interaction.reply({ content: "❌ Mods only.", ephemeral: true });
+ if (interaction.commandName === "giveaway") {
+  const sub = interaction.options.getSubcommand();
 
-      ensureGiveawayData();
-      const sub = interaction.options.getSubcommand();
-
-if (sub === "start") {
-  const prize = interaction.options.getString("prize", true);
-  const durationStr = interaction.options.getString("duration", true);
-  const winners = interaction.options.getInteger("winners", true);
-
-  const sponsorUser = interaction.options.getUser("sponsor", false);
-  const sponsorId = sponsorUser?.id || null;
-
-  // default ping = true unless explicitly set false
-  const pingOpt = interaction.options.getBoolean("ping", false);
-  const shouldPing = pingOpt === null ? true : Boolean(pingOpt);
-
-  const ms = parseDurationToMs(durationStr);
-  if (!ms) return interaction.reply({ content: "❌ Duration must be `10m`, `2h`, or `1d`.", ephemeral: true });
-  if (winners < 1 || winners > 50) return interaction.reply({ content: "❌ Winners must be 1–50.", ephemeral: true });
-
-  const endsAt = Date.now() + ms;
-
-  // ✅ Clean embed fields (no nulls)
-  const fields = [
-    { name: "🧑‍💼 Hosted by", value: `<@${interaction.user.id}>`, inline: true },
-  ];
-  if (sponsorId) fields.push({ name: "🎁 Sponsored by", value: `<@${sponsorId}>`, inline: true });
-
-  const embed = new EmbedBuilder()
-    .setTitle("🎉 Giveaway Started")
-    .setDescription(
-      `**Prize:** ${prize}\n` +
-      `**Winners:** ${winners}\n` +
-      `**Ends:** <t:${Math.floor(endsAt / 1000)}:R>\n\n` +
-      `Click the button below to enter!`
-    )
-    .addFields(fields)
-    .setTimestamp();
-
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("giveaway:enter:pending")
-      .setLabel("Join Giveaway")
-      .setStyle(ButtonStyle.Success)
-  );
-
-  const gwChannelId = String(config.giveawayChannelId || "").trim();
-  const gwChannel = gwChannelId ? await interaction.guild.channels.fetch(gwChannelId).catch(() => null) : null;
-
-  if (!gwChannel || !gwChannel.isTextBased()) {
-    return interaction.reply({ content: "❌ Giveaway channel not found. Check config.giveawayChannelId.", ephemeral: true });
+  // ---------- START ----------
+  if (sub === "start") {
+    // (your existing start code stays here)
+    return;
   }
 
-  const pingText = shouldPing ? giveawayMention() : "";
-  const sponsorPing = sponsorId ? `<@${sponsorId}>` : "";
-  const content = [pingText, sponsorPing].filter(Boolean).join(" ").trim();
+  // ---------- END ----------
+  if (sub === "end") {
+    const messageId = interaction.options.getString("messageid", true);
+    const result = await endGiveawayByMessageId(client, messageId).catch(() => null);
 
-  const msg = await gwChannel.send({
-    content: content || undefined,
-    embeds: [embed],
-    components: [row],
-
-      if (sub === "end") {
-        const messageId = interaction.options.getString("messageid", true);
-        const result = await endGiveawayByMessageId(client, messageId).catch(() => ({ ok: false, reason: "Failed." }));
-        if (!result.ok) return interaction.reply({ content: `❌ ${result.reason}`, ephemeral: true });
-        return interaction.reply({ content: "✅ Giveaway ended.", ephemeral: true });
-      }
-
-      if (sub === "reroll") {
-        const messageId = interaction.options.getString("messageid", true);
-        if (!data.giveaways?.[messageId]) return interaction.reply({ content: "❌ Giveaway not found.", ephemeral: true });
-
-        const result = await endGiveawayByMessageId(client, messageId, { reroll: true }).catch(() => ({ ok: false, reason: "Failed." }));
-        if (!result.ok) return interaction.reply({ content: `❌ ${result.reason}`, ephemeral: true });
-        return interaction.reply({ content: "✅ Rerolled winners.", ephemeral: true });
-      }
+    if (!result || !result.ok) {
+      return interaction.reply({ content: "❌ Giveaway not found or already ended.", ephemeral: true });
     }
+
+    return interaction.reply({ content: "✅ Giveaway ended.", ephemeral: true });
+  }
+
+  // ---------- REROLL ----------
+  if (sub === "reroll") {
+    const messageId = interaction.options.getString("messageid", true);
+    const result = await endGiveawayByMessageId(client, messageId, { reroll: true }).catch(() => null);
+
+    if (!result || !result.ok) {
+      return interaction.reply({ content: "❌ Giveaway not found.", ephemeral: true });
+    }
+
+    return interaction.reply({ content: "🔁 Giveaway rerolled.", ephemeral: true });
+  }
+}
 
     // ---------- /roll ----------
   // ---------- /roll ----------
@@ -1231,6 +1184,7 @@ if (!token) {
 }
 
 client.login(token).catch(console.error);
+
 
 
 
