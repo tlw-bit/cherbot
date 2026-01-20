@@ -479,6 +479,29 @@ client.on("messageCreate", async (message) => {
   try {
     if (!message.guild) return;
     if (message.author.bot) return;
+    // -------------------- Channel context helpers --------------------
+    const inMainRaffleChannel =
+      String(message.channel.id) === String(config.raffleCreateChannelId) ||
+      String(message.channel.parentId) === String(config.raffleCreateChannelId);
+
+    const inMiniCreateChannel =
+      String(message.channel.id) === String(config.miniCreateChannelId) ||
+      String(message.channel.parentId) === String(config.miniCreateChannelId);
+
+    const isThreadInRaffleCreate =
+      message.channel.isThread?.() &&
+      String(message.channel.parentId) === String(config.raffleCreateChannelId);
+
+    const isMod = message.member?.permissions?.has(
+      PermissionsBitField.Flags.ManageGuild
+    );
+console.log(
+  "RAFFLE CHECK",
+  "chan:", message.channel.id,
+  "parent:", message.channel.parentId,
+  "inMain:", inMainRaffleChannel,
+  "isThread:", message.channel.isThread?.()
+);
 
     ensureRaffleData();
 
@@ -1283,4 +1306,5 @@ console.log("Bot starting...");
 console.log("Token present?", Boolean(token), "Length:", token.length);
 
 client.login(token).catch(console.error);
+
 
