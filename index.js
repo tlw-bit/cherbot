@@ -1035,7 +1035,6 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.reply({ content: "❌ Use the Verifier bot for codes.", ephemeral: true });
     }
 
-    const isMod = interaction.member.permissions.has(PermissionsBitField.Flags.ManageGuild);
 
     // ---------- /giveaway ----------
     if (interaction.commandName === "giveaway") {
@@ -1306,5 +1305,6 @@ console.log("Bot starting...");
 console.log("Token present?", Boolean(token), "Length:", token.length);
 
 client.login(token).catch(console.error);
+
 
 
