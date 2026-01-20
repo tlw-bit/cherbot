@@ -571,5 +571,6 @@ if (!token) {
   process.exit(1);
 }
 
+client.login(token).catch(console.error);
 
 
