@@ -942,90 +942,36 @@ if (looksLikeNumberClaim) {
 });
 
 // -------------------- Interactions (buttons + slash commands) --------------------
+// -------------------- Interactions (buttons + slash commands) --------------------
 client.on("interactionCreate", async (interaction) => {
   try {
     // ---------- Buttons ----------
-   if (interaction.isButton()) {
-  const id = interaction.customId;
+    if (interaction.isButton()) {
+      const id = interaction.customId;
 
-  // ✅ ACK immediately so Discord never times out
-  await interaction.deferReply({ ephemeral: true }).catch(() => {});
+      // ACK immediately so Discord never times out
+      await interaction.deferReply({ ephemeral: true }).catch(() => {});
 
-  // Giveaway join button
-  if (id.startsWith("giveaway:enter:")) {
-    ensureGiveawayData();
+      // Giveaway join button
+      if (id.startsWith("giveaway:enter:")) {
+        ensureGiveawayData();
 
-    const messageId = id.split(":")[2];
-    const g = data.giveaways?.[messageId];
+        const messageId = id.split(":")[2];
+        const g = data.giveaways?.[messageId];
 
-    if (!g) return interaction.editReply({ content: "❌ This giveaway no longer exists." });
-    if (g.ended) return interaction.editReply({ content: "❌ This giveaway has ended." });
-
-    if (!Array.isArray(g.participants)) g.participants = [];
-    if (g.participants.includes(interaction.user.id)) {
-      return interaction.editReply({ content: "✅ You’re already entered!" });
-    }
-
-    g.participants.push(interaction.user.id);
-    data.giveaways[messageId] = g;
-    saveData(data);
-
-    return interaction.editReply({ content: `✅ Entered! Entries: **${g.participants.length}**` });
-  }
-
-  // Self-role buttons
-  if (id.startsWith("selfrole:")) {
-    const roleId = id.split(":")[1];
-
-    if (!data.selfRoles?.includes(roleId)) {
-      return interaction.editReply({ content: "❌ That role is no longer self-assignable." });
-    }
-
-    const role = interaction.guild.roles.cache.get(roleId);
-    if (!role) return interaction.editReply({ content: "❌ Role not found." });
-
-    const me = interaction.guild.members.me;
-    if (!me?.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
-      return interaction.editReply({ content: "❌ I need **Manage Roles** permission." });
-    }
-
-    const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
-    if (!member) return interaction.editReply({ content: "❌ Couldn’t fetch your member info." });
-
-    const already = member.roles.cache.has(roleId);
-
-    try {
-      if (already) await member.roles.remove(role);
-      else await member.roles.add(role);
-
-      return interaction.editReply({
-        content: `${already ? "Removed" : "Added"} ${role} ${already ? "from" : "to"} you.`
-      });
-    } catch {
-      return interaction.editReply({
-        content: "❌ I couldn’t change that role. Check my role position."
-      });
-    }
-  }
-
-  // If it wasn't a known button
-  return interaction.editReply({ content: "❌ Unknown button." }).catch(() => {});
-}
-
-deferReply({ ephemeral: true }
-        if (!g) return interaction.reply({ content: "❌ This giveaway no longer exists.", ephemeral: true });
-        if (g.ended) return interaction.reply({ content: "❌ This giveaway has ended.", ephemeral: true });
+        if (!g) return interaction.editReply({ content: "❌ This giveaway no longer exists." });
+        if (g.ended) return interaction.editReply({ content: "❌ This giveaway has ended." });
 
         if (!Array.isArray(g.participants)) g.participants = [];
         if (g.participants.includes(interaction.user.id)) {
-          return interaction.reply({ content: "✅ You’re already entered!", ephemeral: true });
+          return interaction.editReply({ content: "✅ You’re already entered!" });
         }
 
         g.participants.push(interaction.user.id);
         data.giveaways[messageId] = g;
         saveData(data);
 
-        return interaction.reply({ content: `✅ Entered! Entries: **${g.participants.length}**`, ephemeral: true });
+        return interaction.editReply({ content: `✅ Entered! Entries: **${g.participants.length}**` });
       }
 
       // Self-role buttons
@@ -1033,37 +979,37 @@ deferReply({ ephemeral: true }
         const roleId = id.split(":")[1];
 
         if (!data.selfRoles?.includes(roleId)) {
-          return interaction.reply({ content: "❌ That role is no longer self-assignable.", ephemeral: true });
+          return interaction.editReply({ content: "❌ That role is no longer self-assignable." });
         }
 
         const role = interaction.guild.roles.cache.get(roleId);
-        if (!role) return interaction.reply({ content: "❌ Role not found.", ephemeral: true });
+        if (!role) return interaction.editReply({ content: "❌ Role not found." });
 
         const me = interaction.guild.members.me;
         if (!me?.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
-          return interaction.reply({ content: "❌ I need **Manage Roles** permission.", ephemeral: true });
+          return interaction.editReply({ content: "❌ I need **Manage Roles** permission." });
         }
 
-        const member = await interaction.guild.members.fetch(interaction.user.id);
+        const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+        if (!member) return interaction.editReply({ content: "❌ Couldn’t fetch your member info." });
+
         const already = member.roles.cache.has(roleId);
 
         try {
           if (already) await member.roles.remove(role);
           else await member.roles.add(role);
 
-          return interaction.reply({
+          return interaction.editReply({
             content: `${already ? "Removed" : "Added"} ${role} ${already ? "from" : "to"} you.`,
-            ephemeral: true
           });
         } catch {
-          return interaction.reply({
+          return interaction.editReply({
             content: "❌ I couldn’t change that role. Check my role position.",
-            ephemeral: true
           });
         }
       }
 
-      return;
+      return interaction.editReply({ content: "❌ Unknown button." }).catch(() => {});
     }
 
     // ---------- Slash Commands ----------
@@ -1072,63 +1018,226 @@ deferReply({ ephemeral: true }
     const isMod = interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageGuild);
 
     // ---------- /giveaway ----------
-if (interaction.commandName === "giveaway") {
-  if (!isMod) return interaction.reply({ content: "❌ Mods only.", ephemeral: true });
+    if (interaction.commandName === "giveaway") {
+      if (!isMod) return interaction.reply({ content: "❌ Mods only.", ephemeral: true });
 
-  // ✅ ACK immediately so Discord doesn't time out
-  await interaction.deferReply({ ephemeral: true }).catch(() => {});
+      // ACK immediately so Discord doesn't time out
+      await interaction.deferReply({ ephemeral: true }).catch(() => {});
 
-  ensureGiveawayData();
-  const sub = interaction.options.getSubcommand();
+      ensureGiveawayData();
+      const sub = interaction.options.getSubcommand();
 
-  // ---------- START ----------
-  if (sub === "start") {
-    // (your existing start code stays here)
-    return;
-  }
+      // START
+      if (sub === "start") {
+        const prize = interaction.options.getString("prize", true);
+        const durationStr = interaction.options.getString("duration", true);
+        const winners = interaction.options.getInteger("winners", true);
 
-  // ---------- END ----------
-  if (sub === "end") {
-    const messageId = interaction.options.getString("messageid", true);
-    const result = await endGiveawayByMessageId(client, messageId).catch(() => null);
+        const sponsorUser = interaction.options.getUser("sponsor", false);
+        const sponsorId = sponsorUser?.id || null;
 
-    if (!result || !result.ok) {
-      return interaction.reply({ content: "❌ Giveaway not found or already ended.", ephemeral: true });
+        const pingOpt = interaction.options.getBoolean("ping", false);
+        const shouldPing = pingOpt === null ? true : Boolean(pingOpt);
+
+        const ms = parseDurationToMs(durationStr);
+        if (!ms) return interaction.editReply({ content: "❌ Duration must be `10m`, `2h`, or `1d`." });
+        if (winners < 1 || winners > 50) return interaction.editReply({ content: "❌ Winners must be 1–50." });
+
+        const endsAt = Date.now() + ms;
+
+        const fields = [
+          { name: "🧑‍💼 Hosted by", value: `<@${interaction.user.id}>`, inline: true },
+        ];
+        if (sponsorId) fields.push({ name: "🎁 Sponsored by", value: `<@${sponsorId}>`, inline: true });
+
+        const embed = new EmbedBuilder()
+          .setTitle("🎉 Giveaway Started")
+          .setDescription(
+            `**Prize:** ${prize}\n` +
+            `**Winners:** ${winners}\n` +
+            `**Ends:** <t:${Math.floor(endsAt / 1000)}:R>\n\n` +
+            `Click the button below to enter!`
+          )
+          .addFields(fields)
+          .setTimestamp();
+
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("giveaway:enter:pending")
+            .setLabel("Join Giveaway")
+            .setStyle(ButtonStyle.Success)
+        );
+
+        const gwChannelId = String(config.giveawayChannelId || "").trim();
+        const gwChannel = gwChannelId
+          ? await interaction.guild.channels.fetch(gwChannelId).catch(() => null)
+          : null;
+
+        if (!gwChannel || !gwChannel.isTextBased()) {
+          return interaction.editReply({ content: "❌ Giveaway channel not found. Check config.giveawayChannelId." });
+        }
+
+        const pingText = shouldPing ? giveawayMention() : "";
+        const sponsorPing = sponsorId ? `<@${sponsorId}>` : "";
+        const content = [pingText, sponsorPing].filter(Boolean).join(" ").trim();
+
+        const msg = await gwChannel.send({
+          content: content || undefined,
+          embeds: [embed],
+          components: [row],
+          allowedMentions: {
+            roles: shouldPing && config.giveawayRoleId ? [String(config.giveawayRoleId)] : [],
+            users: sponsorId ? [sponsorId] : [],
+          },
+        });
+
+        const row2 = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`giveaway:enter:${msg.id}`)
+            .setLabel("Join Giveaway")
+            .setStyle(ButtonStyle.Success)
+        );
+        await msg.edit({ components: [row2] }).catch(() => {});
+
+        data.giveaways[msg.id] = {
+          guildId: interaction.guildId,
+          channelId: gwChannel.id,
+          prize,
+          winners,
+          endsAt,
+          startedAt: Date.now(),
+          ended: false,
+          participants: [],
+          hostId: interaction.user.id,
+          sponsorId,
+          pinged: shouldPing,
+        };
+        saveData(data);
+
+        return interaction.editReply({
+          content: `✅ Giveaway started in <#${gwChannel.id}> (ID: \`${msg.id}\`)`,
+        });
+      }
+
+      // END
+      if (sub === "end") {
+        const messageId = interaction.options.getString("messageid", true);
+        const result = await endGiveawayByMessageId(client, messageId).catch(() => null);
+        if (!result || !result.ok) return interaction.editReply({ content: `❌ ${result?.reason || "Failed to end giveaway."}` });
+        return interaction.editReply({ content: "✅ Giveaway ended." });
+      }
+
+      // REROLL
+      if (sub === "reroll") {
+        const messageId = interaction.options.getString("messageid", true);
+        const result = await endGiveawayByMessageId(client, messageId, { reroll: true }).catch(() => null);
+        if (!result || !result.ok) return interaction.editReply({ content: `❌ ${result?.reason || "Failed to reroll."}` });
+        return interaction.editReply({ content: "🔁 Giveaway rerolled." });
+      }
+
+      return interaction.editReply({ content: "❌ Unknown subcommand." });
     }
-
-    return interaction.reply({ content: "✅ Giveaway ended.", ephemeral: true });
-  }
-
-  // ---------- REROLL ----------
-  if (sub === "reroll") {
-    const messageId = interaction.options.getString("messageid", true);
-    const result = await endGiveawayByMessageId(client, messageId, { reroll: true }).catch(() => null);
-
-    if (!result || !result.ok) {
-      return interaction.reply({ content: "❌ Giveaway not found.", ephemeral: true });
-    }
-
-    return interaction.reply({ content: "🔁 Giveaway rerolled.", ephemeral: true });
-  }
-}
 
     // ---------- /roll ----------
-  // ---------- /roll ----------
-if (interaction.commandName === "roll") {
-  const sides = Number(interaction.options.getString("die", true));
-  const result = randInt(1, sides);
+    if (interaction.commandName === "roll") {
+      const sides = Number(interaction.options.getString("die", true));
+      const result = randInt(1, sides);
 
-  // The raffle object for THIS channel (thread or normal channel)
-  const raffle = getRaffle(interaction.guildId, interaction.channelId);
+      const raffle = getRaffle(interaction.guildId, interaction.channelId);
+      const meta = data.miniThreads?.[interaction.channelId] || null;
 
-  // If this channel is a MINI thread we created, we can "transfer" the winner to the main thread
-  const meta = data.miniThreads?.[interaction.channelId] || null;
+      const owners = raffle.claims?.[String(result)] || [];
+      const normalizedOwners = Array.isArray(owners) ? owners.map(normalizeUserId).filter(Boolean) : [];
 
-  // Helper to pick a winner from the rolled slot (supports split)
-  const owners = raffle.claims?.[String(result)] || [];
-  const normalizedOwners = Array.isArray(owners)
-    ? owners.map(normalizeUserId).filter(Boolean)
-    : [];
+      if (meta && raffle?.max === sides && raffle.max > 0) {
+        const winnerId = normalizedOwners.length ? normalizedOwners[randInt(0, normalizedOwners.length - 1)] : null;
+
+        const embed = new EmbedBuilder()
+          .setTitle("🎲 Mini draw")
+          .setDescription(
+            winnerId
+              ? `Die: **d${sides}**\nWinning number: **#${result}**\nWinner: <@${winnerId}> 🏆`
+              : `Die: **d${sides}**\nWinning number: **#${result}**\nWinner: _(unclaimed)_ 😬`
+          )
+          .setTimestamp();
+
+        await interaction.reply({
+          content: winnerId ? `<@${winnerId}>` : "",
+          embeds: [embed],
+          allowedMentions: winnerId ? { users: [winnerId] } : undefined,
+        }).catch(() => {});
+
+        if (!winnerId) return;
+
+        const minutes = Number(config.miniClaimWindowMinutes ?? 10);
+        const tickets = Number(meta.tickets || 1);
+        const mainKey = meta.mainKey;
+
+        const mainThreadId = mainKey.split(":")[1];
+        const mainThread = await interaction.guild.channels.fetch(mainThreadId).catch(() => null);
+        if (!mainThread || !mainThread.isTextBased()) return;
+
+        if (mainThread.isThread?.() && mainThread.archived) {
+          await mainThread.setArchived(false).catch(() => {});
+        }
+
+        setReservation(mainKey, winnerId, tickets, minutes);
+
+        const mainRaffle = getRaffle(interaction.guildId, mainThread.id);
+        const left = computeMainsLeft(mainRaffle, mainKey);
+        const ping = gambaMention();
+
+        const msg =
+          `🏆 **Mini winner:** <@${winnerId}> (won mini slot **#${result}**)\n` +
+          `🎟️ Claim **${tickets}** main number(s) in this thread.\n` +
+          `⏳ You have **${minutes} minutes**. Type numbers like: \`2 5 6\`\n` +
+          `📌 **${left} MAINS LEFT**\n` +
+          `${ping ? ping : ""}`.trim();
+
+        await mainThread.send({ content: msg, allowedMentions: { users: [winnerId] } }).catch(() => {});
+        return;
+      }
+
+      if (raffle?.max === sides && raffle.max > 0) {
+        const winnerUserId = normalizedOwners.length ? normalizedOwners[0] : null;
+
+        const embed = new EmbedBuilder()
+          .setTitle("🎲 Raffle draw")
+          .setDescription(
+            winnerUserId
+              ? `Die: **d${sides}**\nWinning number: **#${result}**\nWinner: <@${winnerUserId}> 🎉`
+              : `Die: **d${sides}**\nWinning number: **#${result}**\nWinner: _(unclaimed)_ 😬`
+          )
+          .setTimestamp();
+
+        return interaction.reply({
+          content: winnerUserId ? `<@${winnerUserId}>` : "",
+          embeds: [embed],
+          allowedMentions: winnerUserId ? { users: [winnerUserId] } : undefined,
+        });
+      }
+
+      const embed = new EmbedBuilder()
+        .setTitle("🎲 Roll")
+        .setDescription(`Die: **d${sides}**\nResult: **${result}**`)
+        .setTimestamp();
+
+      return interaction.reply({ embeds: [embed] });
+    }
+
+  } catch (err) {
+    console.error("interactionCreate error:", err?.stack || err);
+    try {
+      if (interaction?.isRepliable?.()) {
+        if (interaction.deferred || interaction.replied) {
+          await interaction.editReply({ content: "❌ Something went wrong." }).catch(() => {});
+        } else {
+          await interaction.reply({ content: "❌ Something went wrong.", ephemeral: true }).catch(() => {});
+        }
+      }
+    } catch {}
+  }
+});
 
   // If in a mini thread AND the die matches the mini size, do mini transfer logic
   if (meta && raffle?.max === sides && raffle.max > 0) {
@@ -1248,6 +1357,7 @@ if (!token) {
 }
 
 client.login(token).catch(console.error);
+
 
 
 
