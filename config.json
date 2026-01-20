@@ -34,11 +34,11 @@
 
   "giveawayChannelId": "1456954533065392128",
   "giveawayWinnerChannelId": "1459609291710398519",
-"giveawayRoleId": "1457667581459828839"
-
-  "miniClaimWindowMinutes": 5,
-  "miniDefaultSlots": 6
+"giveawayRoleId": "1457667581459828839",
+"miniClaimWindowMinutes": 5,
+"miniDefaultSlots": 6
 }
+
 
 
 
