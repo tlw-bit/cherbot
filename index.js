@@ -488,7 +488,6 @@ client.on("messageCreate", async (message) => {
 // -------------------- Interactions (buttons + slash commands) --------------------
 client.on("interactionCreate", async (interaction) => {
   try {
-    // ---------- Buttons ----------
     if (interaction.isButton()) {
       const id = interaction.customId;
 
@@ -511,13 +510,10 @@ client.on("interactionCreate", async (interaction) => {
         data.giveaways[messageId] = g;
         saveData(data);
 
-        return interaction.reply({
-          content: `✅ Entered! Entries: **${g.participants.length}**`,
-          ephemeral: true
-        });
+        return interaction.reply({ content: `✅ Entered! Entries: **${g.participants.length}**`, ephemeral: true });
       }
 
-      // Self-role buttons
+      // Selfrole buttons
       if (id.startsWith("selfrole:")) {
         const roleId = id.split(":")[1];
 
@@ -533,6 +529,7 @@ client.on("interactionCreate", async (interaction) => {
           return interaction.reply({ content: "❌ I need **Manage Roles** permission.", ephemeral: true });
         }
 
+        // ✅ this await is now definitely inside async function
         const member = await interaction.guild.members.fetch(interaction.user.id);
         const already = member.roles.cache.has(roleId);
 
@@ -542,98 +539,32 @@ client.on("interactionCreate", async (interaction) => {
 
           return interaction.reply({
             content: `${already ? "Removed" : "Added"} ${role} ${already ? "from" : "to"} you.`,
-            ephemeral: true
+            ephemeral: true,
           });
         } catch {
-          return interaction.reply({
-            content: "❌ I couldn’t change that role. Check my role position.",
-            ephemeral: true
-          });
+          return interaction.reply({ content: "❌ I couldn’t change that role. Check my role position.", ephemeral: true });
         }
       }
 
-      return;
+      return; // ignore other buttons
     }
 
-    // ---------- Slash Commands ----------
+    // ---------- Slash commands ----------
     if (!interaction.isChatInputCommand()) return;
 
     const isMod = interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageGuild);
 
-    // ✅ Your slash command handlers (/giveaway, /roll, etc) go here.
+    // Put your /giveaway /roll /level /leaderboard /stats /xpreset /givexp logic here
 
   } catch (err) {
     console.error("interactionCreate error:", err);
-    if (interaction?.isRepliable?.()) {
-      try {
-        if (interaction.deferred || interaction.replied) {
-          await interaction.followUp({ content: "❌ Something went wrong.", ephemeral: true });
-        } else {
-          await interaction.reply({ content: "❌ Something went wrong.", ephemeral: true });
-        }
-      } catch {}
-    }
-  }
-});
-
-      // Self-role buttons
-      if (id.startsWith("selfrole:")) {
-        const roleId = id.split(":")[1];
-
-        if (!data.selfRoles?.includes(roleId)) {
-          return interaction.reply({ content: "❌ That role is no longer self-assignable.", ephemeral: true });
-        }
-
-        const role = interaction.guild.roles.cache.get(roleId);
-        if (!role) return interaction.reply({ content: "❌ Role not found.", ephemeral: true });
-
-        const me = interaction.guild.members.me;
-        if (!me?.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
-          return interaction.reply({ content: "❌ I need **Manage Roles** permission.", ephemeral: true });
-        }
-
-        const member = await interaction.guild.members.fetch(interaction.user.id);
-        const already = member.roles.cache.has(roleId);
-
-        try {
-          if (already) await member.roles.remove(role);
-          else await member.roles.add(role);
-
-          return interaction.reply({
-            content: `${already ? "Removed" : "Added"} ${role} ${already ? "from" : "to"} you.`,
-            ephemeral: true
-          });
-        } catch {
-          return interaction.reply({
-            content: "❌ I couldn’t change that role. Check my role position.",
-            ephemeral: true
-          });
-        }
+    try {
+      if (interaction.deferred || interaction.replied) {
+        await interaction.followUp({ content: "❌ Something went wrong.", ephemeral: true });
+      } else {
+        await interaction.reply({ content: "❌ Something went wrong.", ephemeral: true });
       }
-
-      return;
-    }
-
-    // ---------- Slash Commands ----------
-    if (!interaction.isChatInputCommand()) return;
-
-    // IMPORTANT: define isMod for interactions here, NOT using message
-    const isMod = interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageGuild);
-
-    // Your /giveaway /roll /level /leaderboard /stats /xpreset /givexp handling
-    // should be inside here (the slash command code you had before).
-
-  } catch (err) {
-    console.error("interactionCreate error:", err);
-    if (interaction?.isRepliable?.()) {
-      try {
-        if (interaction.deferred || interaction.replied) {
-          await interaction.followUp({ content: "❌ Something went wrong.", ephemeral: true });
-        } else {
-          await interaction.reply({ content: "❌ Something went wrong.", ephemeral: true });
-        }
-      } catch {}
-    }
+    } catch {}
   }
 });
 
@@ -1204,3 +1135,4 @@ client.on("interactionCreate", async (interaction) => {
     console.error("messageCreate error:", err);
   }
 });
+
