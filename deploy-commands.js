@@ -1,3 +1,4 @@
+require("dotenv").config();
 // deploy-commands.js (CLEAN)
 // Registers slash commands to ONE guild (guild commands update fast)
 
@@ -145,3 +146,4 @@ const rest = new REST({ version: "10" }).setToken(token);
     console.error("❌ Failed to deploy commands:", err);
   }
 })();
+
