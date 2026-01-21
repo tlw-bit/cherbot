@@ -1,6 +1,8 @@
+require("dotenv").config();
+
 // Cherbot (Discord.js v14) — clean + stable single-file
 // - XP + levels + level roles
-// - Giveaways: /giveaway start/end/reroll + join button + timed auto-end (NO SWEEP) + (handler) list
+// - Giveaways: /giveaway start/end/reroll + join button + TIMED auto-end (NO SWEEP) + (handler) list
 // - Raffles in threads (main + minis) + mains-left + minis reserve mains + totals + available list
 // - Mini winners marked Ⓜ️ on main board
 // - No @gamba ping on mini create or mini win
@@ -91,13 +93,44 @@ function ensureRaffleData() {
 // -------------------- Giveaway scheduling (NO SWEEP) --------------------
 const giveawayTimers = new Map(); // messageId -> timeout
 
+function clearGiveawayTimer(messageId) {
+  const t = giveawayTimers.get(messageId);
+  if (t) clearTimeout(t);
+  giveawayTimers.delete(messageId);
+}
+
+// Node's setTimeout max delay is ~24.8 days (2^31-1 ms). This chunking prevents overflow.
 function scheduleGiveawayEnd(client, messageId, endsAt) {
   if (!messageId || !endsAt) return;
 
-  const existing = giveawayTimers.get(messageId);
-  if (existing) clearTimeout(existing);
+  clearGiveawayTimer(messageId);
 
-  const delay = Math.max(0, Number(endsAt) - Date.now());
+  const MAX_DELAY = 2147480000; // slightly under 2^31-1
+  const delay = Number(endsAt) - Date.now();
+
+  if (!Number.isFinite(delay)) return;
+
+  // If already due, end asap
+  if (delay <= 0) {
+    const t = setTimeout(() => {
+      giveawayTimers.delete(messageId);
+      endGiveawayByMessageId(client, messageId).catch((e) =>
+        console.error("❌ scheduled giveaway end failed:", messageId, e?.stack || e)
+      );
+    }, 250);
+    giveawayTimers.set(messageId, t);
+    return;
+  }
+
+  // Chunk long waits
+  if (delay > MAX_DELAY) {
+    const t = setTimeout(() => {
+      scheduleGiveawayEnd(client, messageId, endsAt);
+    }, MAX_DELAY);
+    giveawayTimers.set(messageId, t);
+    console.log(`⏲️ Scheduled giveaway end chunk for`, messageId, `(remaining: ${Math.round(delay / 1000)}s)`);
+    return;
+  }
 
   const t = setTimeout(() => {
     giveawayTimers.delete(messageId);
@@ -110,12 +143,6 @@ function scheduleGiveawayEnd(client, messageId, endsAt) {
   console.log(`⏲️ Scheduled giveaway end in ${Math.round(delay / 1000)}s for`, messageId);
 }
 
-function clearGiveawayTimer(messageId) {
-  const t = giveawayTimers.get(messageId);
-  if (t) clearTimeout(t);
-  giveawayTimers.delete(messageId);
-}
-
 // -------------------- Ready --------------------
 client.once("ready", () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
@@ -124,7 +151,8 @@ client.once("ready", () => {
 
   // Re-schedule active giveaways on startup
   for (const [messageId, g] of Object.entries(data.giveaways || {})) {
-    if (!g || g.ended) continue;
+    if (!g) continue;
+    if (g.ended) continue;
     if (!g.endsAt) continue;
     scheduleGiveawayEnd(client, messageId, g.endsAt);
   }
@@ -173,10 +201,112 @@ function normalizeUserId(value) {
   const m = s.match(/\d{15,}/);
   return m ? m[0] : null;
 }
+
+// -------------------- Level roles helpers --------------------
+function getLevelRoleIdsSorted() {
+  const map = config.levelRoles || {};
+  return Object.entries(map)
+    .map(([lvl, roleId]) => ({ lvl: Number(lvl), roleId }))
+    .filter((x) => Number.isFinite(x.lvl) && typeof x.roleId === "string" && x.roleId.length > 0)
+    .sort((a, b) => a.lvl - b.lvl);
+}
+
+function cringeLevelUpLine(level, userMention) {
+  const lines = {
+    2:  `🚧 ${userMention} unlocked **Pool’s Closed**. Lifeguard is imaginary.`,
+    5:  `🪑 ${userMention} is now **Chair Rotator (PRO)**. Spin responsibly.`,
+    8:  `🧢 ${userMention} achieved **Fake HC Member**. Badge? Never heard of it.`,
+    12: `🧃 ${userMention} unlocked **HC Member (Trust Me)**. Source: “trust me”.`,
+    16: `🪙 🚨 WARNING: ${userMention} has reached **Coin Beggar** status.`,
+    20: `🚪 ${userMention} promoted to **Club NX Bouncer**. Pay: exposure.`,
+    25: `🕺 DANGER: ${userMention} is now a **Dancefloor Menace**. Everyone in radius is at risk.`,
+    30: `🪙 ${userMention} is now **Definitely Legit**. Nothing to see here.`,
+    40: `🌱 INTERVENTION: ${userMention} unlocked **Touch Grass Challenge Failed**.`,
+    50: `🏨 FINAL FORM: ${userMention} became **Hotel Legend (Unemployed)**. The hotel owns you now.`,
+  };
+  return lines[level] || `✨ ${userMention} leveled up to **Level ${level}**.`;
+}
+
+async function announceLevelUp(guild, fallbackChannel, user, newLevel) {
+  const userMention = `<@${user.id}>`;
+  const line = cringeLevelUpLine(newLevel, userMention);
+
+  const levelUpId = String(config.levelUpChannelId || "").trim();
+  let postedChannel = null;
+
+  if (levelUpId) {
+    const ch = guild.channels.cache.get(levelUpId);
+    if (ch) {
+      postedChannel = ch;
+      await ch.send({ content: line }).catch(() => {});
+    }
+  }
+
+  if (!postedChannel && fallbackChannel) {
+    await fallbackChannel.send({ content: line }).catch(() => {});
+  }
+}
+
+async function applyLevelRoles(member, level) {
+  const pairs = getLevelRoleIdsSorted();
+  if (!pairs.length) return;
+
+  const me = member.guild.members.me;
+  if (!me?.permissions.has(PermissionsBitField.Flags.ManageRoles)) return;
+
+  const eligible = pairs.filter((p) => p.lvl <= level);
+  if (!eligible.length) return;
+
+  const targetRoleId = eligible[eligible.length - 1].roleId;
+  const targetRole = member.guild.roles.cache.get(targetRoleId);
+  if (targetRole) await member.roles.add(targetRole).catch(() => {});
+}
+
+async function processLevelUps({ guild, channel, userObj, userDiscord, member }) {
+  while (userObj.xp >= xpNeeded(userObj.level)) {
+    userObj.xp -= xpNeeded(userObj.level);
+    userObj.level += 1;
+
+    await announceLevelUp(guild, channel, userDiscord, userObj.level).catch(() => {});
+    if (member) await applyLevelRoles(member, userObj.level).catch(() => {});
+  }
+}
+
+// -------------------- Optional prefix command --------------------
+function makeToyCode() {
+  return "cher-" + Math.random().toString(36).slice(2, 8).toUpperCase();
+}
+
+// -------------------- Giveaway helpers --------------------
+function parseDurationToMs(input) {
+  const s = String(input || "").trim().toLowerCase();
+  const m = s.match(/^(\d+)\s*([mhd])$/i);
+  if (!m) return null;
+
+  const n = Number(m[1]);
+  const unit = m[2].toLowerCase();
+  if (!Number.isFinite(n) || n <= 0) return null;
+
+  if (unit === "m") return n * 60 * 1000;
+  if (unit === "h") return n * 60 * 60 * 1000;
+  if (unit === "d") return n * 24 * 60 * 60 * 1000;
+  return null;
+}
+
+function pickWinnersFrom(array, count) {
+  const pool = [...new Set(array)];
+  const winners = [];
+  while (pool.length && winners.length < count) {
+    const idx = randInt(0, pool.length - 1);
+    winners.push(pool.splice(idx, 1)[0]);
+  }
+  return winners;
+}
+
 async function endGiveawayByMessageId(client, messageId, { reroll = false } = {}) {
   ensureGiveawayData();
 
-  // kill any pending timer if ending manually or by schedule
+  // Stop any scheduled timer for this giveaway
   clearGiveawayTimer(messageId);
 
   const g = data.giveaways?.[messageId];
@@ -217,13 +347,13 @@ async function endGiveawayByMessageId(client, messageId, { reroll = false } = {}
 
   const endedUnix = Math.floor((g.endedAt || Date.now()) / 1000);
 
-  // Winners post embed (winners channel)
-  const resultsEmbed = new EmbedBuilder()
+  // Winners announcement embed (winners channel)
+  const announceEmbed = new EmbedBuilder()
     .setTitle(reroll ? "🔁 Giveaway Rerolled" : "🏁 Giveaway Ended")
-    .addFields(
-      { name: "🏆 Prize", value: String(prize), inline: false },
-      { name: "🎉 Winner(s)", value: winnerText, inline: false },
-      { name: "⏱️ Ended", value: `<t:${endedUnix}:F>`, inline: false }
+    .setDescription(
+      `**Prize:** ${prize}\n` +
+      `**Winners:** ${winnerText}\n` +
+      `**Ended:** <t:${endedUnix}:F>`
     )
     .setTimestamp();
 
@@ -258,11 +388,11 @@ async function endGiveawayByMessageId(client, messageId, { reroll = false } = {}
 
   await targetCh.send({
     content: winners.length ? winnerText : "",
-    embeds: [resultsEmbed],
+    embeds: [announceEmbed],
     allowedMentions: winners.length ? { users: winners } : undefined,
   }).catch((e) => console.error("❌ Winner post failed:", e?.stack || e));
 
-  // disable button + update original giveaway message to show winners
+  // disable button + update original giveaway message (SHOW winners in the embed)
   try {
     const msg = await gwChannel.messages.fetch(messageId);
 
@@ -285,7 +415,7 @@ async function endGiveawayByMessageId(client, messageId, { reroll = false } = {}
           )
           .setTimestamp()
       : new EmbedBuilder()
-          .setTitle("🏁 Giveaway Ended")
+          .setTitle(reroll ? "🔁 Giveaway Rerolled" : "🏁 Giveaway Ended")
           .setDescription(
             `**Prize:** ${prize}\n` +
             `**Winners:** ${winnerText}\n` +
@@ -308,6 +438,7 @@ async function endGiveawayByMessageId(client, messageId, { reroll = false } = {}
 
   return { ok: true, winners };
 }
+
 // -------------------- Raffle / Mini helpers --------------------
 function raffleKey(guildId, channelId) {
   return `${guildId}:${channelId}`;
@@ -411,6 +542,7 @@ function countUserClaims(raffle, userId) {
   }
   return c;
 }
+
 // Board (supports Ⓜ️ if mainKey provided)
 function formatBoardText(raffle, mainKey = null) {
   const closed = !raffle.active || isRaffleFull(raffle);
@@ -455,6 +587,7 @@ async function postOrUpdateBoard(channel, raffle, mainKey = null) {
     saveData(data);
   }
 }
+
 // -------------------- Reservations (mini winners claim window) --------------------
 function getReservation(mainKey, userId) {
   ensureRaffleData();
@@ -521,6 +654,7 @@ async function announceMainsLeftIfChanged(channel, mainRaffle, mainKey) {
   saveData(data);
   await channel.send(`📌 **${left} MAINS LEFT**`).catch(() => {});
 }
+
 // -------------------- Available slots announcements --------------------
 function getAvailableNumbers(raffle) {
   const avail = [];
@@ -636,6 +770,7 @@ async function handleFullRaffle(channel, raffle) {
     allowedMentions: shouldPingHost ? { users: [hostId] } : undefined,
   }).catch(() => {});
 }
+
 // -------------------- MESSAGE CREATE --------------------
 client.on("messageCreate", async (message) => {
   try {
@@ -799,14 +934,273 @@ client.on("messageCreate", async (message) => {
       return message.reply(`✅ Mini thread created: <#${miniThread.id}>`).catch(() => {});
     }
 
-    // (Everything after this point in messageCreate stays the same as your original file)
-    // -------------------- MINI DRAW / split / free / rest / claim / xp --------------------
-    // Keep your original code here unchanged.
+    // -------------------- MINI DRAW (inside mini thread) --------------------
+    if (/^!minidraw$/i.test(content)) {
+      if (!isMod) return message.reply("❌ Mods only.").catch(() => {});
 
+      const meta = data.miniThreads?.[message.channel.id];
+      if (!meta) return message.reply("This isn’t a registered mini thread.").catch(() => {});
+
+      const miniRaffle = getRaffle(message.guild.id, message.channel.id);
+
+      const pool = [];
+      for (const [slot, owners] of Object.entries(miniRaffle.claims || {})) {
+        if (!Array.isArray(owners) || owners.length === 0) continue;
+        for (const raw of owners) {
+          const uid = normalizeUserId(raw);
+          if (uid) pool.push({ slot, uid });
+        }
+      }
+
+      if (pool.length === 0) return message.reply("No one has claimed any mini slots.").catch(() => {});
+
+      const picked = pool[randInt(0, pool.length - 1)];
+      const winningNumber = picked.slot;
+      const winnerId = picked.uid;
+      if (!winnerId) return message.reply("Couldn’t pick a winner.").catch(() => {});
+
+      const minutes = Number(config.miniClaimWindowMinutes ?? 10);
+      const tickets = Number(meta.tickets || 1);
+      const mainKey = meta.mainKey;
+
+      markMiniWinner(mainKey, winnerId);
+
+      const mainThreadId = mainKey.split(":")[1];
+      const mainThread = await message.guild.channels.fetch(mainThreadId).catch(() => null);
+      if (!mainThread || !mainThread.isTextBased()) return message.reply("Main raffle thread not found.").catch(() => {});
+
+      setReservation(mainKey, winnerId, tickets, minutes);
+
+      const mainRaffle = getRaffle(message.guild.id, mainThread.id);
+      const left = computeMainsLeft(mainRaffle, mainKey);
+
+      // ✅ NO @Gamba ping on mini win
+      const contentToSend =
+        `🏆 **Mini winner:** <@${winnerId}> (won mini slot **#${winningNumber}**)\n` +
+        `🎟️ Claim **${tickets}** main number(s) in this thread.\n` +
+        `⏳ You have **${minutes} minutes**. Type numbers like: \`2 5 6\`\n` +
+        `📌 **${left} MAINS LEFT**\n\n- mini`;
+
+      await mainThread.send({
+        content: contentToSend,
+        allowedMentions: { users: [winnerId] },
+      }).catch(() => {});
+
+      await message.reply({
+        content: `🎉 Winner: <@${winnerId}> (slot #${winningNumber}). Tagged in the main thread.`,
+        allowedMentions: { users: [winnerId] },
+      }).catch(() => {});
+
+      return;
+    }
+
+    // -------------------- SPLIT (paid only) --------------------
+    const splitMatch = content.match(/^!?split\s+(\d+)\s+<@!?(\d+)>$/i);
+    if (splitMatch) {
+      const raffle = getRaffle(message.guild.id, message.channel.id);
+      if (!raffle.max) return message.reply("No raffle found here.").catch(() => {});
+
+      const n = Number(splitMatch[1]);
+      const friendId = splitMatch[2];
+
+      if (n < 1 || n > raffle.max) return message.reply(`Pick 1-${raffle.max}.`).catch(() => {});
+      if (isFreeRaffle(raffle)) return message.reply("❌ Split is only for paid raffles.").catch(() => {});
+
+      const owners = raffle.claims[String(n)];
+      if (!owners || owners.length === 0) return message.reply(`Slot #${n} is not claimed yet.`).catch(() => {});
+      if (owners.length >= 2) return message.reply(`Slot #${n} is already split.`).catch(() => {});
+      if (owners[0] !== message.author.id && !isMod) return message.reply("❌ Only the slot owner (or a mod) can split it.").catch(() => {});
+      if (owners[0] === friendId) return message.reply("They’re already on that slot.").catch(() => {});
+
+      raffle.claims[String(n)] = [owners[0], friendId];
+      saveData(data);
+
+      const mk = raffleKey(message.guild.id, message.channel.id);
+      await postOrUpdateBoard(message.channel, raffle, mk);
+
+      return message.reply(`✅ Slot **#${n}** split: <@${owners[0]}> + <@${friendId}> (half each).`).catch(() => {});
+    }
+
+    // -------------------- FREE (text command) --------------------
+    const freeMatch = content.match(/^free(?:\s+(\d+))?$/i);
+    if (freeMatch) {
+      const raffle = getRaffle(message.guild.id, message.channel.id);
+      if (!raffle.max) return message.reply("No raffle found here.").catch(() => {});
+
+      const numArg = freeMatch[1] ? Number(freeMatch[1]) : null;
+
+      if (numArg == null) {
+        const before = countUserClaims(raffle, message.author.id);
+        if (before === 0) return message.reply("You don’t have any claimed numbers.").catch(() => {});
+
+        for (const [num, owners] of Object.entries(raffle.claims)) {
+          if (Array.isArray(owners) && owners.includes(message.author.id)) {
+            const next = owners.filter((uid) => uid !== message.author.id);
+            if (next.length === 0) delete raffle.claims[num];
+            else raffle.claims[num] = next;
+          }
+        }
+        saveData(data);
+
+        const mk = raffleKey(message.guild.id, message.channel.id);
+        await postOrUpdateBoard(message.channel, raffle, mk);
+
+        return message.reply(`🗑️ Freed your slots.`).catch(() => {});
+      }
+
+      if (!isMod) return message.reply("❌ Only mods can free a specific slot number.").catch(() => {});
+      if (numArg < 1 || numArg > raffle.max) return message.reply(`Pick 1-${raffle.max}.`).catch(() => {});
+
+      if (!raffle.claims[String(numArg)] || raffle.claims[String(numArg)].length === 0) {
+        return message.reply(`Slot #${numArg} is already available.`).catch(() => {});
+      }
+
+      delete raffle.claims[String(numArg)];
+      saveData(data);
+
+      const mk = raffleKey(message.guild.id, message.channel.id);
+      await postOrUpdateBoard(message.channel, raffle, mk);
+
+      return message.reply(`🧹 Slot **#${numArg}** is now available.`).catch(() => {});
+    }
+
+    // -------------------- REST (claim remaining slots) --------------------
+    if (/^rest$/i.test(content)) {
+      const raffle = getRaffle(message.guild.id, message.channel.id);
+      if (!raffle.active || !raffle.max) return message.reply("No active raffle here.").catch(() => {});
+
+      let filled = 0;
+      for (let i = 1; i <= raffle.max; i++) {
+        const key = String(i);
+        const owners = raffle.claims[key];
+        if (!owners || owners.length === 0) {
+          raffle.claims[key] = [message.author.id];
+          filled++;
+        }
+      }
+
+      if (filled === 0) return message.reply("Nothing left to claim.").catch(() => {});
+      saveData(data);
+
+      const mk = raffleKey(message.guild.id, message.channel.id);
+      await postOrUpdateBoard(message.channel, raffle, mk);
+
+      await message.reply(`✅ You claimed the rest.`).catch(() => {});
+      await message.react("✅").catch(() => {});
+
+      await maybeAnnounceAvailable(message.channel, raffle).catch(() => {});
+
+      if (isRaffleFull(raffle)) {
+        await handleFullRaffle(message.channel, raffle);
+      }
+      return;
+    }
+
+    // -------------------- CLAIM NUMBERS (type numbers) --------------------
+    const nums = content.match(/\d+/g)?.map((n) => Number(n)) ?? [];
+    const looksLikeNumberClaim = nums.length > 0 && content.replace(/[0-9,\s]/g, "") === "";
+
+    if (looksLikeNumberClaim) {
+      const raffle = getRaffle(message.guild.id, message.channel.id);
+      if (raffle.active && raffle.max > 0) {
+        const uniqueNums = [...new Set(nums)];
+        const invalid = uniqueNums.filter((n) => n < 1 || n > raffle.max);
+        if (invalid.length) {
+          await message.reply(`Pick numbers between 1 and ${raffle.max}. Invalid: ${invalid.join(", ")}`).catch(() => {});
+          return;
+        }
+
+        const mainKey = raffleKey(message.guild.id, message.channel.id);
+        const res = getReservation(mainKey, message.author.id);
+        const freeMode = isFreeRaffle(raffle);
+
+        const alreadyCount = countUserClaims(raffle, message.author.id);
+        if (freeMode && alreadyCount >= 1 && !res) {
+          await message.reply("This is a **FREE** raffle: you can only claim **1** slot. Use `free` to change it.").catch(() => {});
+          return;
+        }
+
+        const allowed = res ? res.remaining : uniqueNums.length;
+        const toTry = uniqueNums.slice(0, allowed);
+
+        const claimed = [];
+        const taken = [];
+
+        for (const n of toTry) {
+          const key = String(n);
+          const owners = raffle.claims[key];
+
+          if (!owners || owners.length === 0) {
+            raffle.claims[key] = [message.author.id];
+            claimed.push(n);
+            continue;
+          }
+
+          if (owners.includes(message.author.id)) continue;
+
+          if (owners.length === 1 && !freeMode) {
+            raffle.claims[key] = [owners[0], message.author.id];
+            claimed.push(n);
+            continue;
+          }
+
+          taken.push(n);
+        }
+
+        if (!claimed.length) {
+          await message.reply(`❌ None claimed.`).catch(() => {});
+          return;
+        }
+
+        saveData(data);
+        if (res) useReservation(mainKey, message.author.id, claimed.length);
+
+        await postOrUpdateBoard(message.channel, raffle, mainKey);
+
+        await message.react("✅").catch(() => {});
+        if (taken.length) await message.react("⚠️").catch(() => {});
+
+        await maybeAnnounceAvailable(message.channel, raffle).catch(() => {});
+
+        if (isRaffleFull(raffle)) {
+          await handleFullRaffle(message.channel, raffle);
+        }
+
+        return; // no XP for claim-only messages
+      }
+    }
+
+    // -------------------- XP system --------------------
+    if (!shouldAwardXp(message.channel.id)) return;
+
+    const xpMin = Number(config.xpMin ?? 10);
+    const xpMax = Number(config.xpMax ?? 20);
+    const cooldownSeconds = Number(config.cooldownSeconds ?? 60);
+
+    const userObj = ensureUser(message.author.id);
+    const now = Date.now();
+    if (now - (userObj.lastXpAt || 0) < cooldownSeconds * 1000) return;
+
+    const gained = randInt(xpMin, xpMax);
+    userObj.lastXpAt = now;
+    userObj.xp += gained;
+
+    const member = await message.guild.members.fetch(message.author.id).catch(() => null);
+
+    await processLevelUps({
+      guild: message.guild,
+      channel: message.channel,
+      userObj,
+      userDiscord: message.author,
+      member,
+    });
+
+    saveData(data);
   } catch (err) {
     console.error("messageCreate error:", err?.stack || err);
   }
 });
+
 // -------------------- Interactions (buttons + slash commands) --------------------
 client.on("interactionCreate", async (interaction) => {
   try {
@@ -836,7 +1230,39 @@ client.on("interactionCreate", async (interaction) => {
         return interaction.editReply({ content: `✅ Entered! Entries: **${g.participants.length}**` });
       }
 
-      // (Your selfrole button handler remains unchanged in your original file)
+      // Self-role buttons
+      if (id.startsWith("selfrole:")) {
+        const roleId = id.split(":")[1];
+
+        if (!data.selfRoles?.includes(roleId)) {
+          return interaction.editReply({ content: "❌ That role is no longer self-assignable." });
+        }
+
+        const role = interaction.guild.roles.cache.get(roleId);
+        if (!role) return interaction.editReply({ content: "❌ Role not found." });
+
+        const me = interaction.guild.members.me;
+        if (!me?.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
+          return interaction.editReply({ content: "❌ I need **Manage Roles** permission." });
+        }
+
+        const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+        if (!member) return interaction.editReply({ content: "❌ Couldn’t fetch your member info." });
+
+        const already = member.roles.cache.has(roleId);
+
+        try {
+          if (already) await member.roles.remove(role);
+          else await member.roles.add(role);
+
+          return interaction.editReply({
+            content: `${already ? "Removed" : "Added"} ${role} ${already ? "from" : "to"} you.`,
+          });
+        } catch {
+          return interaction.editReply({ content: "❌ I couldn’t change that role. Check my role position." });
+        }
+      }
+
       return interaction.editReply({ content: "❌ Unknown button." }).catch(() => {});
     }
 
@@ -844,6 +1270,113 @@ client.on("interactionCreate", async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
 
     const isMod = interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageGuild);
+
+    // ---------- /assign ----------
+    if (interaction.commandName === "assign") {
+      if (!isMod) return interaction.reply({ content: "❌ Mods only.", ephemeral: true });
+
+      const slot = interaction.options.getInteger("slot", true);
+      const user = interaction.options.getUser("user", true);
+      const user2 = interaction.options.getUser("user2", false);
+
+      const raffle = getRaffle(interaction.guildId, interaction.channelId);
+      if (!raffle?.max || raffle.max <= 0) {
+        return interaction.reply({ content: "❌ No raffle found in this channel/thread.", ephemeral: true });
+      }
+
+      if (slot < 1 || slot > raffle.max) {
+        return interaction.reply({ content: `❌ Slot must be between 1 and ${raffle.max}.`, ephemeral: true });
+      }
+
+      const mainKey = raffleKey(interaction.guildId, interaction.channelId);
+      const freeMode = isFreeRaffle(raffle);
+
+      if (freeMode && user2) {
+        return interaction.reply({ content: "❌ Split assignment is only allowed on **paid** raffles.", ephemeral: true });
+      }
+
+      // Reservation protection
+      const currentOwnersRaw = raffle.claims?.[String(slot)] || [];
+      const currentOwners = Array.isArray(currentOwnersRaw)
+        ? currentOwnersRaw.map(normalizeUserId).filter(Boolean)
+        : [];
+
+      if (currentOwners.length) {
+        const lockedOwners = currentOwners.filter((uid) => !!getReservation(mainKey, uid));
+        if (lockedOwners.length) {
+          const who = lockedOwners.map((id) => `<@${id}>`).join(" + ");
+          return interaction.reply({
+            content:
+              `⛔ Slot **#${slot}** is protected right now.\n` +
+              `${who} has an active **mini claim window**.\n` +
+              `Wait for it to expire, then try again.`,
+            ephemeral: true,
+          });
+        }
+      }
+
+      const owners = [user.id];
+      if (!freeMode && user2 && user2.id !== user.id) owners.push(user2.id);
+
+      raffle.claims[String(slot)] = owners;
+      saveData(data);
+
+      if (interaction.channel?.isTextBased?.()) {
+        await postOrUpdateBoard(interaction.channel, raffle, mainKey);
+      }
+
+      return interaction.reply({
+        content: `✅ Assigned slot **#${slot}** to ${owners.map((id) => `<@${id}>`).join(" + ")}.`,
+        allowedMentions: { users: owners },
+      });
+    }
+
+    // ---------- /free ----------
+    if (interaction.commandName === "free") {
+      const slot = interaction.options.getInteger("slot", false);
+      const raffle = getRaffle(interaction.guildId, interaction.channelId);
+
+      if (!raffle?.max || raffle.max <= 0) {
+        return interaction.reply({ content: "❌ No raffle found in this channel/thread.", ephemeral: true });
+      }
+
+      const mainKey = raffleKey(interaction.guildId, interaction.channelId);
+
+      // mod free specific slot
+      if (slot !== null) {
+        if (!isMod) return interaction.reply({ content: "❌ Only mods can free a specific slot.", ephemeral: true });
+        if (slot < 1 || slot > raffle.max) return interaction.reply({ content: `❌ Slot must be 1-${raffle.max}.`, ephemeral: true });
+
+        if (!raffle.claims[String(slot)] || raffle.claims[String(slot)].length === 0) {
+          return interaction.reply({ content: `ℹ️ Slot **#${slot}** is already available.`, ephemeral: true });
+        }
+
+        delete raffle.claims[String(slot)];
+        saveData(data);
+        await postOrUpdateBoard(interaction.channel, raffle, mainKey);
+
+        return interaction.reply({ content: `🧹 Slot **#${slot}** is now available.` });
+      }
+
+      // user frees all own slots
+      let freed = 0;
+      for (const [num, owners] of Object.entries(raffle.claims)) {
+        if (!Array.isArray(owners)) continue;
+        if (owners.includes(interaction.user.id)) {
+          const remaining = owners.filter((id) => id !== interaction.user.id);
+          if (remaining.length === 0) delete raffle.claims[num];
+          else raffle.claims[num] = remaining;
+          freed++;
+        }
+      }
+
+      if (freed === 0) return interaction.reply({ content: "ℹ️ You don’t have any claimed slots to free.", ephemeral: true });
+
+      saveData(data);
+      await postOrUpdateBoard(interaction.channel, raffle, mainKey);
+
+      return interaction.reply({ content: `🗑️ Freed your slot(s).`, ephemeral: true });
+    }
 
     // ---------- /giveaway ----------
     if (interaction.commandName === "giveaway") {
@@ -853,6 +1386,7 @@ client.on("interactionCreate", async (interaction) => {
       ensureGiveawayData();
       const sub = interaction.options.getSubcommand();
 
+      // LIST (handler ready; you must also add the subcommand in deploy-commands.js)
       if (sub === "list") {
         const active = Object.entries(data.giveaways || {}).filter(([_, g]) => g && !g.ended);
         if (!active.length) return interaction.editReply({ content: "No active giveaways saved." });
@@ -945,7 +1479,7 @@ client.on("interactionCreate", async (interaction) => {
         };
         saveData(data);
 
-        // ✅ schedule the giveaway end (NO SWEEP)
+        // ✅ schedule the end (NO SWEEP)
         scheduleGiveawayEnd(client, msg.id, endsAt);
 
         console.log("✅ Giveaway saved:", msg.id, "endsAt:", endsAt, "channel:", gwChannel.id);
@@ -972,8 +1506,41 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.editReply({ content: "❌ Unknown subcommand." });
     }
 
-    // (Your /assign, /free, /roll blocks remain unchanged in your original file)
+    // ---------- /roll ----------
+    if (interaction.commandName === "roll") {
+      const sides = Number(interaction.options.getString("die", true));
+      const result = randInt(1, sides);
 
+      const raffle = getRaffle(interaction.guildId, interaction.channelId);
+      const owners = raffle.claims?.[String(result)] || [];
+      const normalizedOwners = Array.isArray(owners) ? owners.map(normalizeUserId).filter(Boolean) : [];
+
+      if (raffle?.max === sides && raffle.max > 0) {
+        const winnerUserId = normalizedOwners.length ? normalizedOwners[0] : null;
+
+        const embed = new EmbedBuilder()
+          .setTitle("🎲 Raffle draw")
+          .setDescription(
+            winnerUserId
+              ? `Die: **d${sides}**\nWinning number: **#${result}**\nWinner: <@${winnerUserId}> 🎉`
+              : `Die: **d${sides}**\nWinning number: **#${result}**\nWinner: _(unclaimed)_ 😬`
+          )
+          .setTimestamp();
+
+        return interaction.reply({
+          content: winnerUserId ? `<@${winnerUserId}>` : "",
+          embeds: [embed],
+          allowedMentions: winnerUserId ? { users: [winnerUserId] } : undefined,
+        });
+      }
+
+      const embed = new EmbedBuilder()
+        .setTitle("🎲 Roll")
+        .setDescription(`Die: **d${sides}**\nResult: **${result}**`)
+        .setTimestamp();
+
+      return interaction.reply({ embeds: [embed] });
+    }
   } catch (err) {
     console.error("interactionCreate error:", err?.stack || err);
     try {
