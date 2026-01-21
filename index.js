@@ -1552,25 +1552,28 @@ if (interaction.commandName === "roll") {
     ? owners.map(normalizeUserId).filter(Boolean)
     : [];
 
-  // If this looks like a raffle draw (die matches raffle max), announce winner
+  // If this looks like a raffle draw (die matches raffle max), announce winner(s)
   if (raffle?.max === sides && raffle.max > 0) {
-    const winnerUserId = normalizedOwners.length ? normalizedOwners[0] : null;
+    const winnerUserIds = [...new Set(normalizedOwners)].slice(0, 2); // supports splits
+    const winnerText = winnerUserIds.length
+      ? winnerUserIds.map((id) => `<@${id}>`).join(" + ")
+      : null;
 
     const embed = new EmbedBuilder()
       .setTitle("🎲 Raffle draw")
       .setDescription(
-        winnerUserId
-          ? `Die: **d${sides}**\nWinning number: **#${result}**\nWinner: <@${winnerUserId}> 🎉`
+        winnerText
+          ? `Die: **d${sides}**\nWinning number: **#${result}**\nWinner: ${winnerText} 🎉`
           : `Die: **d${sides}**\nWinning number: **#${result}**\nWinner: _(unclaimed)_ 😬`
       )
       .setTimestamp();
 
     // Reply in the channel where /roll was used
     await interaction.reply({
-      content: winnerUserId ? `<@${winnerUserId}>` : "",
+      content: winnerText || "",
       embeds: [embed],
-      allowedMentions: winnerUserId
-        ? { users: [winnerUserId], roles: [], everyone: false }
+      allowedMentions: winnerUserIds.length
+        ? { users: winnerUserIds, roles: [], everyone: false }
         : undefined,
     });
 
@@ -1578,10 +1581,10 @@ if (interaction.commandName === "roll") {
     const winnerCh = await getRaffleWinnersChannel(interaction.guild).catch(() => null);
     if (winnerCh) {
       await winnerCh.send({
-        content: winnerUserId ? `<@${winnerUserId}>` : "",
+        content: winnerText || "",
         embeds: [embed],
-        allowedMentions: winnerUserId
-          ? { users: [winnerUserId], roles: [], everyone: false }
+        allowedMentions: winnerUserIds.length
+          ? { users: winnerUserIds, roles: [], everyone: false }
           : undefined,
       }).catch(() => {});
     }
@@ -1597,19 +1600,6 @@ if (interaction.commandName === "roll") {
 
   return interaction.reply({ embeds: [embed] });
 }
-  } catch (err) {
-    console.error("interactionCreate error:", err?.stack || err);
-    try {
-      if (interaction?.isRepliable?.()) {
-        if (interaction.deferred || interaction.replied) {
-          await interaction.editReply({ content: "❌ Something went wrong." }).catch(() => {});
-        } else {
-          await interaction.reply({ content: "❌ Something went wrong.", ephemeral: true }).catch(() => {});
-        }
-      }
-    } catch {}
-  }
-});
 
 
 // -------------------- Login --------------------
@@ -1619,4 +1609,5 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
+
 
