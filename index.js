@@ -1,5 +1,3 @@
-require("dotenv").config();
-
 // Cherbot (Discord.js v14) — clean + stable single-file
 // - XP + levels + level roles
 // - Giveaways: /giveaway start/end/reroll + join button + sweep auto-end + (handler) list
@@ -1500,6 +1498,7 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
+
 
 
 
