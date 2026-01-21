@@ -786,22 +786,28 @@ function autoFillRemainingMains(mainRaffle, winnerId, maxTickets) {
 
 // -------------------- Post or Update Board --------------------
 async function postOrUpdateBoard(channel, raffle, mainKey = null, title = "🎟️ Raffle Board") {
-  const embed = formatBoardEmbed(raffle, mainKey, title);
+  try {
+    const embed = formatBoardEmbed(raffle, mainKey, title);
 
-  if (raffle.lastBoardMessageId) {
-    try {
-      const msg = await channel.messages.fetch(raffle.lastBoardMessageId);
-      await msg.edit({ embeds: [embed] }).catch(() => {});
-      return;
-    } catch {
-      raffle.lastBoardMessageId = null;
+    if (raffle.lastBoardMessageId) {
+      try {
+        const msg = await channel.messages.fetch(raffle.lastBoardMessageId);
+        await msg.edit({ embeds: [embed] });
+        return;
+      } catch (e) {
+        console.log("⚠️ Board message not found, posting new one:", raffle.lastBoardMessageId);
+        raffle.lastBoardMessageId = null;
+      }
     }
-  }
 
-  const msg = await channel.send({ embeds: [embed] }).catch(() => null);
-  if (msg) {
-    raffle.lastBoardMessageId = msg.id;
-    saveData(data);
+    const msg = await channel.send({ embeds: [embed] });
+    if (msg) {
+      raffle.lastBoardMessageId = msg.id;
+      saveData(data);
+      console.log("✅ Board posted:", { messageId: msg.id, channelId: channel.id });
+    }
+  } catch (err) {
+    console.error("❌ postOrUpdateBoard error:", err?.message || err);
   }
 }
 
