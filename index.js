@@ -285,8 +285,26 @@ async function endGiveawayByMessageId(client, messageId, { reroll = false } = {}
     .setTimestamp();
 
   const winnerChannelId = String(config.giveawayWinnerChannelId || "").trim();
-  const winCh = winnerChannelId ? await guild.channels.fetch(winnerChannelId).catch(() => null) : null;
-  const targetCh = (winCh && winCh.isTextBased()) ? winCh : gwChannel;
+const winnerChannelId = String(config.giveawayWinnerChannelId || "").trim();
+
+let winCh = null;
+if (winnerChannelId) {
+  try {
+    winCh = await guild.channels.fetch(winnerChannelId);
+    console.log("✅ Winners channel fetched:", {
+      id: winCh.id,
+      type: winCh.type,
+      isTextBased: !!winCh.isTextBased?.(),
+      name: winCh.name,
+    });
+  } catch (e) {
+    console.error("❌ Failed to fetch winners channel:", winnerChannelId, e?.rawError || e?.message || e);
+  }
+}
+
+const targetCh = (winCh && winCh.isTextBased?.()) ? winCh : gwChannel;
+console.log("📣 Posting winners to:", targetCh.id, targetCh.id === gwChannel.id ? "(FALLBACK to giveaway channel)" : "(winners channel)");
+
 
   await targetCh.send({
     content: winners.length ? winnerText : "",
@@ -1444,5 +1462,6 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
+
 
 
