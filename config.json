@@ -11,6 +11,7 @@
   "levelUpChannelId": "1456967580299559066",
 
   "winnersChannelId": "1459609291710398519",
+  "raffleWinnerChannelId": "1459609291710398519",
 
   "levelRoles": {
     "2": "1462479094859038773",
@@ -30,16 +31,12 @@
 
   "raffleCreateChannelId": "1459631522775564538",
   "miniCreateChannelId": "1463153415936020665",
-  "gambaRoleId": "1456957921005932585", 
+  "gambaRoleId": "1456957921005932585",
 
   "giveawayChannelId": "1456954533065392128",
   "giveawayWinnerChannelId": "1459609291710398519",
-"giveawayRoleId": "1457667581459828839",
-"miniClaimWindowMinutes": 5,
-"miniDefaultSlots": 6
+  "giveawayRoleId": "1457667581459828839",
+
+  "miniClaimWindowMinutes": 5,
+  "miniDefaultSlots": 6
 }
-
-
-
-
-
