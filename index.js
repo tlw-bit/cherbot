@@ -737,11 +737,13 @@ async function postTotalsIfFull(channel, raffle, title) {
 
 // -------------------- FULL handler (shared) --------------------
 async function handleFullRaffle(channel, raffle) {
+  if (raffle.fullNotified) return; // ✅ Prevent duplicate FULL messages
+  
   const isMini = Boolean(data.miniThreads?.[channel.id]);
   const hostId = normalizeUserId(raffle.hostId);
-  const shouldPingHost = !isMini && hostId && !raffle.fullNotified;
+  const shouldPingHost = !isMini && hostId;
 
-  if (shouldPingHost) raffle.fullNotified = true;
+  raffle.fullNotified = true;
   raffle.active = false;
   saveData(data);
 
@@ -787,12 +789,21 @@ function autoFillRemainingMains(mainRaffle, winnerId, maxTickets) {
 // -------------------- Post or Update Board --------------------
 async function postOrUpdateBoard(channel, raffle, mainKey = null, title = "🎟️ Raffle Board") {
   try {
+    console.log("📊 postOrUpdateBoard called:", { channelId: channel.id, title, claimsCount: Object.keys(raffle.claims || {}).length, raffle_max: raffle.max });
+    
     const embed = formatBoardEmbed(raffle, mainKey, title);
+    console.log("✅ Embed created:", { 
+      title: embed.data.title, 
+      fieldCount: embed.data.fields?.length, 
+      descLength: embed.data.description?.length,
+      fields: embed.data.fields?.map(f => f.name)
+    });
 
     if (raffle.lastBoardMessageId) {
       try {
         const msg = await channel.messages.fetch(raffle.lastBoardMessageId);
         await msg.edit({ embeds: [embed] });
+        console.log("✅ Board updated:", { messageId: msg.id, channelId: channel.id });
         return;
       } catch (e) {
         console.log("⚠️ Board message not found, posting new one:", raffle.lastBoardMessageId);
@@ -804,7 +815,7 @@ async function postOrUpdateBoard(channel, raffle, mainKey = null, title = "🎟�
     if (msg) {
       raffle.lastBoardMessageId = msg.id;
       saveData(data);
-      console.log("✅ Board posted:", { messageId: msg.id, channelId: channel.id });
+      console.log("✅ Board posted:", { messageId: msg.id, channelId: channel.id, isMini: Boolean(data.miniThreads?.[channel.id]) });
     }
   } catch (err) {
     console.error("❌ postOrUpdateBoard error:", err?.message || err);
@@ -950,7 +961,12 @@ client.on("messageCreate", async (message) => {
       setReservation(mainKey, `mini:${miniThread.id}`, tickets, 24 * 60); // 24hr placeholder reservation
 
       // ✅ NO @Gamba ping on mini creation
-      await postOrUpdateBoard(miniThread, miniRaffle);
+      try {
+        await postOrUpdateBoard(miniThread, miniRaffle);
+      } catch (e) {
+        console.error("❌ CRITICAL: postOrUpdateBoard failed during mini creation:", e?.message || e);
+        await miniThread.send("⚠️ Error: Board failed to post. Check bot permissions.").catch(() => {});
+      }
 
       await miniThread.send(
         `🎲 **Mini created**\n` +
@@ -1045,6 +1061,8 @@ let autoClaimed = [];
       }
 
       // otherwise normal claim window
+      console.log("📢 Sending mini winner claim message:", { winnerId, tickets, minutes, mainThreadId });
+      
       const claimMsg = await mainThread.send({
         content:
           `<@${winnerId}>\n` +
@@ -1057,8 +1075,10 @@ let autoClaimed = [];
         return null;
       });
 
-      if (!claimMsg) {
-        console.error("⚠️ Mini winner message failed to send to main thread", { winnerId, mainThreadId, tickets, minutes });
+      if (claimMsg) {
+        console.log("✅ Mini winner message sent successfully:", { messageId: claimMsg.id, winnerId });
+      } else {
+        console.error("⚠️ Mini winner message failed to send", { winnerId, mainThreadId, tickets, minutes });
       }
 
       return;
