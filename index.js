@@ -265,7 +265,9 @@ async function endGiveawayByMessageId(client, messageId, { reroll = false } = {}
   if (!guild) return { ok: false, reason: "Guild not available." };
 
   const gwChannel = await guild.channels.fetch(g.channelId).catch(() => null);
-  if (!gwChannel || !gwChannel.isTextBased()) return { ok: false, reason: "Giveaway channel not found." };
+  if (!gwChannel || !gwChannel.isTextBased()) {
+    return { ok: false, reason: "Giveaway channel not found." };
+  }
 
   const participants = Array.isArray(g.participants) ? g.participants : [];
   const winners = pickWinnersFrom(participants, Number(g.winners) || 1);
@@ -277,52 +279,49 @@ async function endGiveawayByMessageId(client, messageId, { reroll = false } = {}
   saveData(data);
 
   const prize = g.prize || "Giveaway";
-  const winnerText = winners.length ? winners.map((id) => `<@${id}>`).join(", ") : "_No valid entries_";
+  const winnerText = winners.length
+    ? winners.map((id) => `<@${id}>`).join(", ")
+    : "_No valid entries_";
 
-const endedUnix = Math.floor((g.endedAt || Date.now()) / 1000);
+  const endedUnix = Math.floor((g.endedAt || Date.now()) / 1000);
 
-const embed = new EmbedBuilder()
-  .setTitle(reroll ? "🔁 Giveaway Rerolled" : "🏁 Giveaway Ended")
-  .setDescription(
-    `**Prize:** ${prize}\n` +
-    `**Winners:** ${winnerText}\n` +
-    `**Ended:** <t:${endedUnix}:F>`
-  )
-  .setTimestamp();
+  const embed = new EmbedBuilder()
+    .setTitle(reroll ? "🔁 Giveaway Rerolled" : "🏁 Giveaway Ended")
+    .setDescription(
+      `**Prize:** ${prize}\n` +
+      `**Winners:** ${winnerText}\n` +
+      `**Ended:** <t:${endedUnix}:F>`
+    )
+    .setTimestamp();
 
-const winnerChannelId = String(config.giveawayWinnerChannelId || "").trim();
+  const winnerChannelId = String(config.giveawayWinnerChannelId || "").trim();
 
-let winCh = null;
-if (winnerChannelId) {
-  try {
-    winCh = await guild.channels.fetch(winnerChannelId);
-    console.log("✅ Winners channel fetched:", {
-      id: winCh.id,
-      type: winCh.type,
-      isTextBased: !!winCh.isTextBased?.(),
-      name: winCh.name,
-    });
-  } catch (e) {
-    console.error(
-      "❌ Failed to fetch winners channel:",
-      winnerChannelId,
-      e?.rawError || e?.message || e
-    );
+  let winCh = null;
+  if (winnerChannelId) {
+    try {
+      winCh = await guild.channels.fetch(winnerChannelId);
+      console.log("✅ Winners channel fetched:", {
+        id: winCh.id,
+        type: winCh.type,
+        isTextBased: !!winCh.isTextBased?.(),
+        name: winCh.name,
+      });
+    } catch (e) {
+      console.error(
+        "❌ Failed to fetch winners channel:",
+        winnerChannelId,
+        e?.rawError || e?.message || e
+      );
+    }
   }
-}
 
-const targetCh =
-  winCh && winCh.isTextBased?.() ? winCh : gwChannel;
+  const targetCh = winCh && winCh.isTextBased?.() ? winCh : gwChannel;
 
-console.log(
-  "📣 Posting winners to:",
-  targetCh.id,
-  targetCh.id === gwChannel.id
-    ? "(FALLBACK to giveaway channel)"
-    : "(winners channel)"
-);
-
-
+  console.log(
+    "📣 Posting winners to:",
+    targetCh.id,
+    targetCh.id === gwChannel.id ? "(FALLBACK to giveaway channel)" : "(winners channel)"
+  );
 
   await targetCh.send({
     content: winners.length ? winnerText : "",
@@ -331,43 +330,43 @@ console.log(
   }).catch((e) => console.error("❌ Winner post failed:", e?.stack || e));
 
   // disable button + update original giveaway message
-try {
-  const msg = await gwChannel.messages.fetch(messageId);
+  try {
+    const msg = await gwChannel.messages.fetch(messageId);
 
-  // Disable the join button
-  const disabledRow = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`giveaway:enter:${messageId}`)
-      .setLabel("Giveaway Ended")
-      .setStyle(ButtonStyle.Secondary)
-      .setDisabled(true)
-  );
+    const disabledRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`giveaway:enter:${messageId}`)
+        .setLabel("Giveaway Ended")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(true)
+    );
 
-  // Update the embed so it clearly shows ENDED
-  const originalEmbed = msg.embeds?.[0];
-  const endedEmbed = originalEmbed
-    ? EmbedBuilder.from(originalEmbed)
-        .setTitle(reroll ? "🔁 Giveaway Rerolled" : "🏁 Giveaway Ended")
-        .setTimestamp()
-    : new EmbedBuilder()
-        .setTitle("🏁 Giveaway Ended")
-        .setTimestamp();
+    const originalEmbed = msg.embeds?.[0];
+    const endedEmbed = originalEmbed
+      ? EmbedBuilder.from(originalEmbed)
+          .setTitle(reroll ? "🔁 Giveaway Rerolled" : "🏁 Giveaway Ended")
+          .setTimestamp()
+      : new EmbedBuilder()
+          .setTitle("🏁 Giveaway Ended")
+          .setTimestamp();
 
-  await msg.edit({
-    embeds: [endedEmbed],
-    components: [disabledRow],
-  });
+    await msg.edit({
+      embeds: [endedEmbed],
+      components: [disabledRow],
+    });
 
-  console.log("✅ Giveaway message updated & button disabled:", messageId);
-} catch (e) {
-  console.error(
-    "⚠️ Failed to update original giveaway message:",
-    e?.rawError || e?.message || e
-  );
+    console.log("✅ Giveaway message updated & button disabled:", messageId);
+  } catch (e) {
+    console.error(
+      "⚠️ Failed to update original giveaway message:",
+      e?.rawError || e?.message || e
+    );
+  }
+
+  return { ok: true, winners };
 }
 
-
-// ✅ SINGLE sweep function (no duplicates)
+// ✅ SINGLE sweep function (outside endGiveawayByMessageId)
 async function giveawaySweep(client) {
   ensureGiveawayData();
   const now = Date.now();
