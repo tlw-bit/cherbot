@@ -1061,7 +1061,7 @@ let autoClaimed = [];
             `🏆 **Mini Winner!** (slot #${winningNumber})\n\n` +
             `⚡ **Auto-filled final mains:** ${autoClaimed.join(", ")}\n` +
             `✅ Main raffle is now **FULL**`,
-          allowedMentions: { parse: ['users'], users: [winnerId] },
+          allowedMentions: { parse: ['users'] },
         }).catch((e) => console.error("❌ Failed to send mini winner auto-fill message:", e?.message || e));
 
         await handleFullRaffle(mainThread, mainRaffle);
@@ -1077,7 +1077,7 @@ let autoClaimed = [];
           `🏆 **Mini Winner!** (slot #${winningNumber})\n` +
           `🎟️ Claim **${tickets}** main slot(s)\n` +
           `⏳ **${minutes} minutes** — others are paused`,
-        allowedMentions: { parse: ['users'], users: [winnerId] },
+        allowedMentions: { parse: ['users'] },
       }).catch((e) => {
         console.error("❌ Failed to send mini winner claim message:", e?.message || e);
         return null;
