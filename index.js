@@ -103,6 +103,17 @@ async function giveawaySweep(client) {
 
   for (const [messageId, g] of Object.entries(data.giveaways)) {
     if (!g) continue;
+    if (g.ended) continue;
+    if (!g.endsAt || now < g.endsAt) continue;
+
+    console.log("⏰ Ending giveaway (sweep):", messageId, "endsAt:", g.endsAt, "now:", now);
+
+    await endGiveawayByMessageId(client, messageId).catch((e) => {
+      console.error("❌ Sweep end failed:", messageId, e?.stack || e);
+    });
+  }
+}
+;
 
     // DEBUG: show status
     // console.log("[SWEEP]", messageId, "ended:", g.ended, "endsAt:", g.endsAt, "now:", now);
@@ -320,15 +331,6 @@ async function endGiveawayByMessageId(client, messageId, { reroll = false } = {}
   return { ok: true, winners };
 }
 
-async function giveawaySweep(client) {
-  ensureGiveawayData();
-  const now = Date.now();
-  for (const [messageId, g] of Object.entries(data.giveaways)) {
-    if (!g || g.ended) continue;
-    if (!g.endsAt || now < g.endsAt) continue;
-    await endGiveawayByMessageId(client, messageId).catch(() => {});
-  }
-}
 
 // -------------------- Raffle / Mini helpers --------------------
 function raffleKey(guildId, channelId) {
@@ -1450,4 +1452,5 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
+
 
