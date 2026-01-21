@@ -13,8 +13,8 @@ if (!token) {
   process.exit(1);
 }
 
-const clientId = config.clientId;
-const guildId = config.guildId;
+const clientId = String(config.clientId || "").trim();
+const guildId = String(config.guildId || "").trim();
 
 if (!clientId || !guildId) {
   console.error("❌ clientId or guildId missing in config.json");
@@ -37,7 +37,7 @@ const commands = [
     .addUserOption(opt => opt.setName("user").setDescription("User to inspect").setRequired(true))
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 
-  // ✅ /free (slash version of text command)
+  // /free (mods can optionally free a specific slot)
   new SlashCommandBuilder()
     .setName("free")
     .setDescription("Free raffle slot(s)")
@@ -63,7 +63,7 @@ const commands = [
     .addIntegerOption(opt => opt.setName("amount").setDescription("XP amount (can be negative)").setRequired(true))
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 
-  // ✅ /giveaway added
+  // /giveaway (mods only)
   new SlashCommandBuilder()
     .setName("giveaway")
     .setDescription("Giveaway commands (mods only)")
@@ -72,53 +72,31 @@ const commands = [
       sub
         .setName("start")
         .setDescription("Start a giveaway")
-        .addStringOption(opt =>
-          opt.setName("prize").setDescription("Prize name").setRequired(true)
-        )
-        .addStringOption(opt =>
-          opt.setName("duration").setDescription("Duration like 10m, 2h, 1d").setRequired(true)
-        )
-        .addIntegerOption(opt =>
-          opt.setName("winners").setDescription("Number of winners (1–50)").setRequired(true)
-        )
-        .addUserOption(opt =>
-          opt.setName("sponsor").setDescription("Who is sponsoring this giveaway?").setRequired(false)
-        )
-        .addBooleanOption(opt =>
-          opt.setName("ping").setDescription("Ping the giveaway role? (default: true)").setRequired(false)
-        )
+        .addStringOption(opt => opt.setName("prize").setDescription("Prize name").setRequired(true))
+        .addStringOption(opt => opt.setName("duration").setDescription("Duration like 10m, 2h, 1d").setRequired(true))
+        .addIntegerOption(opt => opt.setName("winners").setDescription("Number of winners (1–50)").setRequired(true))
+        .addUserOption(opt => opt.setName("sponsor").setDescription("Who is sponsoring this giveaway?").setRequired(false))
+        .addBooleanOption(opt => opt.setName("ping").setDescription("Ping the giveaway role? (default: true)").setRequired(false))
     )
     .addSubcommand(sub =>
       sub
         .setName("end")
         .setDescription("End a giveaway early")
-        .addStringOption(opt =>
-          opt.setName("messageid").setDescription("Giveaway message ID").setRequired(true)
-        )
+        .addStringOption(opt => opt.setName("messageid").setDescription("Giveaway message ID").setRequired(true))
     )
     .addSubcommand(sub =>
       sub
         .setName("reroll")
         .setDescription("Reroll winners for a finished giveaway")
-        .addStringOption(opt =>
-          opt.setName("messageid").setDescription("Giveaway message ID").setRequired(true)
-        )
+        .addStringOption(opt => opt.setName("messageid").setDescription("Giveaway message ID").setRequired(true))
+    )
+    .addSubcommand(sub =>
+      sub
+        .setName("list")
+        .setDescription("List active giveaways (mods only)")
     ),
-if (sub === "list") {
-  ensureGiveawayData();
-  const active = Object.entries(data.giveaways)
-    .filter(([_, g]) => g && !g.ended)
-    .slice(0, 10);
 
-  if (!active.length) return interaction.editReply({ content: "No active giveaways saved." });
-
-  const lines = active.map(([id, g]) =>
-    `• ID: \`${id}\` | Prize: **${g.prize}** | Ends: <t:${Math.floor(g.endsAt / 1000)}:R>`
-  );
-
-  return interaction.editReply({ content: lines.join("\n") });
-
-  // ✅ /assign added (mods only) — supports optional split user2
+  // /assign (mods only)
   new SlashCommandBuilder()
     .setName("assign")
     .setDescription("Assign a raffle slot to a user (mods only)")
@@ -143,7 +121,7 @@ if (sub === "list") {
         .setRequired(false)
     ),
 
-  // ✅ /roll added
+  // /roll
   new SlashCommandBuilder()
     .setName("roll")
     .setDescription("Roll a die (d4, d6, d8, d10, d20, d50)")
@@ -173,4 +151,3 @@ const rest = new REST({ version: "10" }).setToken(token);
     console.error("❌ Failed to deploy commands:", err);
   }
 })();
-
