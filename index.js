@@ -785,27 +785,6 @@ function autoFillRemainingMains(mainRaffle, winnerId, maxTickets) {
 }
 
 // -------------------- Post or Update Board --------------------
-async function postOrUpdateBoard(channel, raffle, mainKey = null, title = null) {
-  const embed = formatBoardEmbed(
-    raffle,
-    mainKey,
-    title || (data.miniThreads?.[channel.id] ? "🎲 Mini Board" : "🎟️ Main Board")
-  );
-
-  if (raffle.lastBoardMessageId) {
-    const msg = await channel.messages.fetch(raffle.lastBoardMessageId).catch(() => null);
-    if (msg) {
-      await msg.edit({ embeds: [embed], content: "" }).catch(() => {});
-      return;
-    }
-  }
-
-  const sent = await channel.send({ embeds: [embed] }).catch(() => null);
-  if (sent) {
-    raffle.lastBoardMessageId = sent.id;
-    saveData(data);
-  }
-}
 
 // -------------------- MESSAGE CREATE --------------------
 client.on("messageCreate", async (message) => {
