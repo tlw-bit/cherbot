@@ -946,6 +946,9 @@ client.on("messageCreate", async (message) => {
       miniRaffle.createdAt = Date.now();
       saveData(data);
 
+      // ✅ Reserve the main slots for this mini immediately
+      setReservation(mainKey, `mini:${miniThread.id}`, tickets, 24 * 60); // 24hr placeholder reservation
+
       // ✅ NO @Gamba ping on mini creation
       await postOrUpdateBoard(miniThread, miniRaffle);
 
@@ -958,10 +961,11 @@ client.on("messageCreate", async (message) => {
       ).catch(() => {});
 
       // ✅ NO @Gamba ping on main thread mini announcement
+      const updatedMainsLeft = computeMainsLeft(getRaffle(message.guild.id, message.channel.id), mainKey);
       await message.channel.send(
         `🎲 **Mini created:** <#${miniThread.id}>\n` +
           `✅ **${tickets} main slot(s) reserved for this mini**\n` +
-          `📌 **${computeMainsLeft(getRaffle(message.guild.id, message.channel.id), mainKey)} MAINS LEFT**`
+          `📌 **${updatedMainsLeft} MAINS LEFT**`
       ).catch(() => {});
 
       return message.reply(`✅ Mini thread created: <#${miniThread.id}>`).catch(() => {});
@@ -1004,6 +1008,11 @@ if (!mainThread || !mainThread.isTextBased()) {
   return message.reply("Main raffle thread not found.").catch(() => {});
 }
 
+// Clear the placeholder reservation set on mini creation
+if (data.reservations[mainKey]?.[`mini:${message.channel.id}`]) {
+  delete data.reservations[mainKey][`mini:${message.channel.id}`];
+}
+
 setReservation(mainKey, winnerId, tickets, minutes);
 
 const mainRaffle = getRaffle(message.guild.id, mainThread.id);
@@ -1029,21 +1038,28 @@ let autoClaimed = [];
             `⚡ **Auto-filled final mains:** ${autoClaimed.join(", ")}\n` +
             `✅ Main raffle is now **FULL**`,
           allowedMentions: { users: [winnerId] },
-        });
+        }).catch((e) => console.error("❌ Failed to send mini winner auto-fill message:", e?.message || e));
 
         await handleFullRaffle(mainThread, mainRaffle);
         return;
       }
 
       // otherwise normal claim window
-      await mainThread.send({
+      const claimMsg = await mainThread.send({
         content:
           `<@${winnerId}>\n` +
           `🏆 **Mini Winner!** (slot #${winningNumber})\n` +
           `🎟️ Claim **${tickets}** main slot(s)\n` +
           `⏳ **${minutes} minutes** — others are paused`,
         allowedMentions: { users: [winnerId] },
+      }).catch((e) => {
+        console.error("❌ Failed to send mini winner claim message:", e?.message || e);
+        return null;
       });
+
+      if (!claimMsg) {
+        console.error("⚠️ Mini winner message failed to send to main thread", { winnerId, mainThreadId, tickets, minutes });
+      }
 
       return;
     }
