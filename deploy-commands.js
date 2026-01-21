@@ -147,5 +147,3 @@ const rest = new REST({ version: "10" }).setToken(token);
     console.error("❌ Failed to deploy commands:", err);
   }
 })();
-
-
