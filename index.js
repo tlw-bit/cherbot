@@ -1597,6 +1597,19 @@ if (interaction.commandName === "roll") {
 
   return interaction.reply({ embeds: [embed] });
 }
+  } catch (err) {
+    console.error("interactionCreate error:", err?.stack || err);
+    try {
+      if (interaction?.isRepliable?.()) {
+        if (interaction.deferred || interaction.replied) {
+          await interaction.editReply({ content: "❌ Something went wrong." }).catch(() => {});
+        } else {
+          await interaction.reply({ content: "❌ Something went wrong.", ephemeral: true }).catch(() => {});
+        }
+      }
+    } catch {}
+  }
+});
 
 
 // -------------------- Login --------------------
@@ -1606,5 +1619,4 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
-
 
