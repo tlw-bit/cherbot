@@ -1583,11 +1583,20 @@ client.on("interactionCreate", async (interaction) => {
         });
 
      // Also post in winners channel if configured
-const winnerCh = await getRaffleWinnersChannel(interaction.guild).catch(() => null);
-if (winnerCh) {
-  const isMiniThread = Boolean(data.miniThreads?.[interaction.channelId]);
+const isMini = Boolean(data.miniThreads?.[interaction.channelId]);
+if (!isMini) {
+  const winnerCh = await getRaffleWinnersChannel(interaction.guild).catch(() => null);
+  if (winnerCh) {
+    await winnerCh.send({
+      content: winnerText || "",
+      embeds: [embed],
+      allowedMentions: winnerUserIds.length
+        ? { users: winnerUserIds, roles: [], everyone: false }
+        : undefined,
+    }).catch(() => {});
+  }
+}
 
-  await winnerCh
     .send({
       // ✅ minis: no ping in winners channel
       content: isMiniThread ? undefined : (winnerText || ""),
@@ -1632,3 +1641,4 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
+
