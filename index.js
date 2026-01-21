@@ -1630,6 +1630,37 @@ if (!isMini) {
   }
 });
 
+// -------------------- New Member Welcome --------------------
+client.on("guildMemberAdd", async (member) => {
+  try {
+    const welcomeChannelId = "1456962809425559613";
+    const verifyChannelId = "1462386529765691473";
+
+    const welcomeChannel = await member.guild.channels.fetch(welcomeChannelId).catch(() => null);
+    const verifyChannel = await member.guild.channels.fetch(verifyChannelId).catch(() => null);
+
+    if (!welcomeChannel || !welcomeChannel.isTextBased()) return;
+
+    const embed = new EmbedBuilder()
+      .setTitle("👋 Welcome!")
+      .setDescription(
+        `Welcome to the server, <@${member.id}>!\n\n` +
+        `Please head to <#${verifyChannelId}> to verify and get started.`
+      )
+      .setColor(0x2ecc71)
+      .setThumbnail(member.user.displayAvatarURL())
+      .setTimestamp();
+
+    await welcomeChannel.send({
+      content: `<@${member.id}>`,
+      embeds: [embed],
+      allowedMentions: { users: [member.id] },
+    }).catch(() => {});
+  } catch (err) {
+    console.error("guildMemberAdd error:", err?.stack || err);
+  }
+});
+
 // -------------------- Login --------------------
 const token = String(process.env.DISCORD_TOKEN || "").trim();
 if (!token) {
