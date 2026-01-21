@@ -524,7 +524,8 @@ function isRaffleFull(raffle) {
   return raffle.max > 0 && countClaimedSlots(raffle) >= raffle.max;
 }
 
-// -------------------- Board (EMBED ONLY) --------------------function formatBoardEmbed(raffle, mainKey = null, title = "🎟️ Raffle Board") {
+// -------------------- Board (EMBED ONLY) --------------------
+function formatBoardEmbed(raffle, mainKey = null, title = "🎟️ Raffle Board") {
   const closed = !raffle.active || isRaffleFull(raffle);
 
   const max = Number(raffle.max) || 0;
@@ -855,28 +856,14 @@ client.on("messageCreate", async (message) => {
       saveData(data);
 
       // Post the board
-     async function postOrUpdateBoard(channel, raffle, mainKey = null, title = null) {
-  const embed = formatBoardEmbed(
-    raffle,
-    mainKey,
-    title || (data.miniThreads?.[channel.id] ? "🎲 Mini Board" : "🎟️ Main Board")
-  );
+      await postOrUpdateBoard(message.channel, raffle, mainKey);
 
-  if (raffle.lastBoardMessageId) {
-    const msg = await channel.messages.fetch(raffle.lastBoardMessageId).catch(() => null);
-    if (msg) {
-      await msg.edit({ embeds: [embed], content: "" }).catch(() => {});
+      // keep gamba ping for MAIN raffle start
+      const ping = gambaMention();
+      if (ping) await message.channel.send(ping).catch(() => {});
+
       return;
     }
-  }
-
-  const sent = await channel.send({ embeds: [embed] }).catch(() => null);
-  if (sent) {
-    raffle.lastBoardMessageId = sent.id;
-    saveData(data);
-  }
-}
-
 
     // -------------------- MINI CREATE --------------------
     const miniMatch = content.match(/^!mini\s+(\d+)\s*x(?:\s+(\d+))?\s*-\s*(\d+)\s*(?:c|coins?)$/i);
@@ -1596,18 +1583,6 @@ if (!isMini) {
     }).catch(() => {});
   }
 }
-
-    .send({
-      // ✅ minis: no ping in winners channel
-      content: isMiniThread ? undefined : (winnerText || ""),
-      embeds: [embed],
-      allowedMentions: isMiniThread
-        ? { users: [], roles: [], everyone: false }
-        : (winnerUserIds.length ? { users: winnerUserIds, roles: [], everyone: false } : undefined),
-    })
-    .catch(() => {});
-}
-
 
         return;
       }
