@@ -104,6 +104,19 @@ const commands = [
           opt.setName("messageid").setDescription("Giveaway message ID").setRequired(true)
         )
     ),
+if (sub === "list") {
+  ensureGiveawayData();
+  const active = Object.entries(data.giveaways)
+    .filter(([_, g]) => g && !g.ended)
+    .slice(0, 10);
+
+  if (!active.length) return interaction.editReply({ content: "No active giveaways saved." });
+
+  const lines = active.map(([id, g]) =>
+    `• ID: \`${id}\` | Prize: **${g.prize}** | Ends: <t:${Math.floor(g.endsAt / 1000)}:R>`
+  );
+
+  return interaction.editReply({ content: lines.join("\n") });
 
   // ✅ /assign added (mods only) — supports optional split user2
   new SlashCommandBuilder()
@@ -160,3 +173,4 @@ const rest = new REST({ version: "10" }).setToken(token);
     console.error("❌ Failed to deploy commands:", err);
   }
 })();
+
