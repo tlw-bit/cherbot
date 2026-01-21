@@ -768,6 +768,36 @@ async function handleFullRaffle(channel, raffle) {
   }).catch(() => {});
 }
 
+// -------------------- Helper functions for raffles --------------------
+function isFreeRaffle(raffle) {
+  return !raffle.slotPrice || raffle.slotPrice === 0;
+}
+
+function countUserClaims(raffle, userId) {
+  let count = 0;
+  for (const owners of Object.values(raffle.claims || {})) {
+    if (Array.isArray(owners) && owners.includes(userId)) count++;
+  }
+  return count;
+}
+
+function parseCoinPriceFromText(priceText) {
+  const s = String(priceText || "").trim().toLowerCase();
+  const m = s.match(/(\d+)\s*c(?:oins?)?/i);
+  return m ? Number(m[1]) : 0;
+}
+
+function autoFillRemainingMains(mainRaffle, winnerId, maxTickets) {
+  const available = getAvailableNumbers(mainRaffle);
+  const toClaim = available.slice(0, maxTickets);
+
+  for (const n of toClaim) {
+    mainRaffle.claims[String(n)] = [winnerId];
+  }
+
+  return toClaim;
+}
+
 // -------------------- MESSAGE CREATE --------------------
 client.on("messageCreate", async (message) => {
   try {
@@ -839,31 +869,15 @@ client.on("messageCreate", async (message) => {
       raffle.createdAt = Date.now();
       saveData(data);
 
-  // keep gamba ping for MAIN raffle start
-const ping = gambaMention();
-if (ping) await message.channel.send(ping).catch(() => {});
+      // Post the board
+      await postOrUpdateBoard(message.channel, raffle, mainKey, "🎟️ Main Board");
 
-async function postOrUpdateBoard(channel, raffle, mainKey = null, title) {
-  const embed = formatBoardEmbed(
-    raffle,
-    mainKey,
-    title || (data.miniThreads?.[channel.id] ? "🎲 Mini Board" : "🎟️ Main Board")
-  );
+      // keep gamba ping for MAIN raffle start
+      const ping = gambaMention();
+      if (ping) await message.channel.send(ping).catch(() => {});
 
-  if (raffle.lastBoardMessageId) {
-    const msg = await channel.messages.fetch(raffle.lastBoardMessageId).catch(() => null);
-    if (msg) {
-      await msg.edit({ embeds: [embed], content: null }).catch(() => {});
       return;
     }
-  }
-
-  const sent = await channel.send({ embeds: [embed] }).catch(() => null);
-  if (sent) {
-    raffle.lastBoardMessageId = sent.id;
-    saveData(data);
-  }
-}
 
     // -------------------- MINI CREATE --------------------
     const miniMatch = content.match(/^!mini\s+(\d+)\s*x(?:\s+(\d+))?\s*-\s*(\d+)\s*(?:c|coins?)$/i);
@@ -936,23 +950,13 @@ async function postOrUpdateBoard(channel, raffle, mainKey = null, title) {
           `✅ **${tickets} main slot(s) reserved for this mini**\n` +
           `📌 **${computeMainsLeft(getRaffle(message.guild.id, message.channel.id), mainKey)} MAINS LEFT**`
       ).catch(() => {});
-function autoFillRemainingMains(mainRaffle, winnerId, maxTickets) {
-  const available = getAvailableNumbers(mainRaffle);
-  const toClaim = available.slice(0, maxTickets);
-
-  for (const n of toClaim) {
-    mainRaffle.claims[String(n)] = [winnerId];
-  }
-
-  return toClaim;
-}
 
       return message.reply(`✅ Mini thread created: <#${miniThread.id}>`).catch(() => {});
     }
 
-// -------------------- MINI DRAW (inside mini thread) --------------------
-if (/^!minidraw$/i.test(content)) {
-  if (!isMod) return message.reply("❌ Mods only.").catch(() => {});
+    // -------------------- MINI DRAW (inside mini thread) --------------------
+    if (/^!minidraw$/i.test(content)) {
+      if (!isMod) return message.reply("❌ Mods only.").catch(() => {});
 
   const meta = data.miniThreads?.[message.channel.id];
   if (!meta) return message.reply("This isn’t a registered mini thread.").catch(() => {});
@@ -998,35 +1002,38 @@ await postOrUpdateBoard(mainThread, mainRaffle, mainKey, "🎟️ Main Board");
 const mainsLeft = getAvailableNumbers(mainRaffle).length;
 let autoClaimed = [];
 
-if (tickets >= mainsLeft && mainsLeft > 0) {
-  autoClaimed = autoFillRemainingMains(mainRaffle, winnerId, tickets);
-  useReservation(mainKey, winnerId, autoClaimed.length);
-  saveData(data);
+      if (tickets >= mainsLeft && mainsLeft > 0) {
+        autoClaimed = autoFillRemainingMains(mainRaffle, winnerId, tickets);
+        useReservation(mainKey, winnerId, autoClaimed.length);
+        saveData(data);
 
-  await postOrUpdateBoard(mainThread, mainRaffle, mainKey, "🎟️ Main Board");
+        await postOrUpdateBoard(mainThread, mainRaffle, mainKey, "🎟️ Main Board");
 
-  await mainThread.send({
-    content:
-      `<@${winnerId}>\n` +
-      `🏆 **Mini Winner!** (slot #${winningNumber})\n\n` +
-      `⚡ **Auto-filled final mains:** ${autoClaimed.join(", ")}\n` +
-      `✅ Main raffle is now **FULL**`,
-    allowedMentions: { users: [winnerId] },
-  });
+        await mainThread.send({
+          content:
+            `<@${winnerId}>\n` +
+            `🏆 **Mini Winner!** (slot #${winningNumber})\n\n` +
+            `⚡ **Auto-filled final mains:** ${autoClaimed.join(", ")}\n` +
+            `✅ Main raffle is now **FULL**`,
+          allowedMentions: { users: [winnerId] },
+        });
 
-  await handleFullRaffle(mainThread, mainRaffle);
-  return;
-}
+        await handleFullRaffle(mainThread, mainRaffle);
+        return;
+      }
 
-// otherwise normal claim window
-await mainThread.send({
-  content:
-    `<@${winnerId}>\n` +
-    `🏆 **Mini Winner!** (slot #${winningNumber})\n` +
-    `🎟️ Claim **${tickets}** main slot(s)\n` +
-    `⏳ **${minutes} minutes** — others are paused`,
-  allowedMentions: { users: [winnerId] },
-});
+      // otherwise normal claim window
+      await mainThread.send({
+        content:
+          `<@${winnerId}>\n` +
+          `🏆 **Mini Winner!** (slot #${winningNumber})\n` +
+          `🎟️ Claim **${tickets}** main slot(s)\n` +
+          `⏳ **${minutes} minutes** — others are paused`,
+        allowedMentions: { users: [winnerId] },
+      });
+
+      return;
+    }
 
 
     // -------------------- SPLIT (paid only) --------------------
@@ -1239,10 +1246,10 @@ if (isRaffleLockedForUser(mainKey, message.author.id, isMod)) {
     });
 
     saveData(data);
-   catch (err) {
+  } catch (err) {
     console.error("messageCreate error:", err?.stack || err);
   }
-);
+});
 
 // -------------------- Interactions (buttons + slash commands) --------------------
 client.on("interactionCreate", async (interaction) => {
