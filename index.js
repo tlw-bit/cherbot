@@ -811,7 +811,10 @@ async function postOrUpdateBoard(channel, raffle, mainKey = null, title = "🎟�
       }
     }
 
-    const msg = await channel.send({ embeds: [embed] });
+    const msg = await channel.send({ embeds: [embed] }).catch((e) => {
+      console.error("❌ postOrUpdateBoard send error:", e?.message || e);
+      throw e;
+    });
     if (msg) {
       raffle.lastBoardMessageId = msg.id;
       saveData(data);
@@ -941,6 +944,14 @@ client.on("messageCreate", async (message) => {
 
       if (!miniThread) return message.reply("❌ I couldn't create the mini thread (check permissions).").catch(() => {});
 
+      // ✅ Add bot to thread and verify it can send messages
+      try {
+        await miniThread.members.add(client.user.id);
+        console.log("✅ Bot added to mini thread:", miniThread.id);
+      } catch (e) {
+        console.warn("⚠️ Failed to add bot to thread (might already be in it):", e?.message || e);
+      }
+
       data.miniThreads[miniThread.id] = { mainKey, tickets, createdAt: Date.now() };
       saveData(data);
 
@@ -1050,7 +1061,7 @@ let autoClaimed = [];
             `🏆 **Mini Winner!** (slot #${winningNumber})\n\n` +
             `⚡ **Auto-filled final mains:** ${autoClaimed.join(", ")}\n` +
             `✅ Main raffle is now **FULL**`,
-          allowedMentions: { users: [winnerId] },
+          allowedMentions: { parse: ['users'], users: [winnerId] },
         }).catch((e) => console.error("❌ Failed to send mini winner auto-fill message:", e?.message || e));
 
         await handleFullRaffle(mainThread, mainRaffle);
@@ -1066,7 +1077,7 @@ let autoClaimed = [];
           `🏆 **Mini Winner!** (slot #${winningNumber})\n` +
           `🎟️ Claim **${tickets}** main slot(s)\n` +
           `⏳ **${minutes} minutes** — others are paused`,
-        allowedMentions: { users: [winnerId] },
+        allowedMentions: { parse: ['users'], users: [winnerId] },
       }).catch((e) => {
         console.error("❌ Failed to send mini winner claim message:", e?.message || e);
         return null;
@@ -1205,6 +1216,21 @@ if (isRaffleLockedForUser(mainKey, message.author.id, isMod)) {
         const mainKey = raffleKey(message.guild.id, message.channel.id);
         const res = getReservation(mainKey, message.author.id);
         const freeMode = isFreeRaffle(raffle);
+
+        // ⛔ Get reserved slot count (for mini placeholders or active claim windows)
+        const totalReserved = Object.values(data.reservations?.[mainKey] || {})
+          .filter((r) => r && r.remaining > 0 && Date.now() < r.expiresAt)
+          .reduce((a, b) => a + b.remaining, 0);
+        
+        const claimedCount = countClaimedSlots(raffle);
+        const availableCount = Math.max(0, raffle.max - claimedCount - totalReserved);
+        
+        if (availableCount <= 0 && !res) {
+          return message
+            .reply("⛔ All slots are currently reserved. A mini winner is claiming reserved mains. Please wait.")
+            .catch(() => {});
+        }
+
 // ⛔ Pause other claims while a mini winner has an active claim window
 if (isRaffleLockedForUser(mainKey, message.author.id, isMod)) {
   return message
