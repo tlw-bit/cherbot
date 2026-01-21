@@ -785,6 +785,25 @@ function autoFillRemainingMains(mainRaffle, winnerId, maxTickets) {
 }
 
 // -------------------- Post or Update Board --------------------
+async function postOrUpdateBoard(channel, raffle, mainKey = null, title = "🎟️ Raffle Board") {
+  const embed = formatBoardEmbed(raffle, mainKey, title);
+
+  if (raffle.lastBoardMessageId) {
+    try {
+      const msg = await channel.messages.fetch(raffle.lastBoardMessageId);
+      await msg.edit({ embeds: [embed] }).catch(() => {});
+      return;
+    } catch {
+      raffle.lastBoardMessageId = null;
+    }
+  }
+
+  const msg = await channel.send({ embeds: [embed] }).catch(() => null);
+  if (msg) {
+    raffle.lastBoardMessageId = msg.id;
+    saveData(data);
+  }
+}
 
 // -------------------- MESSAGE CREATE --------------------
 client.on("messageCreate", async (message) => {
