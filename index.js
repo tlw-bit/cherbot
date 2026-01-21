@@ -669,14 +669,13 @@ function formatAvailableList(avail, maxToShow = 80) {
   const more = avail.length > shown.length ? ` … (+${avail.length - shown.length} more)` : "";
   return `${compressRanges(shown)}${more}`;
 }
- {
+ async function maybeAnnounceAvailable(channel, raffle) {
   const afterClaimed = Number(config.availableAfterClaimed ?? 10);
   const every = Number(config.availableAnnounceEvery ?? 5);
   const maxToShow = Number(config.availableMaxToShow ?? 40);
 
   const claimed = countClaimedSlots(raffle);
   if (claimed < afterClaimed) return;
-
   if (every > 0 && claimed % every !== 0) return;
   if (raffle.lastAvailableAnnouncedClaimed === claimed) return;
 
@@ -686,9 +685,9 @@ function formatAvailableList(avail, maxToShow = 80) {
   const avail = getAvailableNumbers(raffle);
   if (!avail.length) return;
 
-  await channel
-    .send(`🟢 **Available (${avail.length})**: ${formatAvailableList(avail, maxToShow)}`)
-    .catch(() => {});
+  await channel.send(
+    `🟢 **Available (${avail.length})**: ${formatAvailableList(avail, maxToShow)}`
+  ).catch(() => {});
 }
 
 
