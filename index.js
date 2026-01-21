@@ -1239,10 +1239,10 @@ if (isRaffleLockedForUser(mainKey, message.author.id, isMod)) {
     });
 
     saveData(data);
-  } catch (err) {
+   catch (err) {
     console.error("messageCreate error:", err?.stack || err);
   }
-});
+);
 
 // -------------------- Interactions (buttons + slash commands) --------------------
 client.on("interactionCreate", async (interaction) => {
