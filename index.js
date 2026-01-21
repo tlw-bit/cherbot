@@ -290,8 +290,6 @@ const embed = new EmbedBuilder()
   )
   .setTimestamp();
 
-
-  const winnerChannelId = String(config.giveawayWinnerChannelId || "").trim();
 const winnerChannelId = String(config.giveawayWinnerChannelId || "").trim();
 
 let winCh = null;
@@ -305,12 +303,25 @@ if (winnerChannelId) {
       name: winCh.name,
     });
   } catch (e) {
-    console.error("❌ Failed to fetch winners channel:", winnerChannelId, e?.rawError || e?.message || e);
+    console.error(
+      "❌ Failed to fetch winners channel:",
+      winnerChannelId,
+      e?.rawError || e?.message || e
+    );
   }
 }
 
-const targetCh = (winCh && winCh.isTextBased?.()) ? winCh : gwChannel;
-console.log("📣 Posting winners to:", targetCh.id, targetCh.id === gwChannel.id ? "(FALLBACK to giveaway channel)" : "(winners channel)");
+const targetCh =
+  winCh && winCh.isTextBased?.() ? winCh : gwChannel;
+
+console.log(
+  "📣 Posting winners to:",
+  targetCh.id,
+  targetCh.id === gwChannel.id
+    ? "(FALLBACK to giveaway channel)"
+    : "(winners channel)"
+);
+
 
 
   await targetCh.send({
@@ -1490,6 +1501,7 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
+
 
 
 
