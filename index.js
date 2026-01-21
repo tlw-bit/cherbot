@@ -279,10 +279,17 @@ async function endGiveawayByMessageId(client, messageId, { reroll = false } = {}
   const prize = g.prize || "Giveaway";
   const winnerText = winners.length ? winners.map((id) => `<@${id}>`).join(", ") : "_No valid entries_";
 
-  const embed = new EmbedBuilder()
-    .setTitle(reroll ? "🔁 Giveaway Reroll" : "🏁 Giveaway Ended")
-    .setDescription(`**Prize:** ${prize}\n**Winners:** ${winnerText}`)
-    .setTimestamp();
+const endedUnix = Math.floor((g.endedAt || Date.now()) / 1000);
+
+const embed = new EmbedBuilder()
+  .setTitle(reroll ? "🔁 Giveaway Rerolled" : "🏁 Giveaway Ended")
+  .setDescription(
+    `**Prize:** ${prize}\n` +
+    `**Winners:** ${winnerText}\n` +
+    `**Ended:** <t:${endedUnix}:F>`
+  )
+  .setTimestamp();
+
 
   const winnerChannelId = String(config.giveawayWinnerChannelId || "").trim();
 const winnerChannelId = String(config.giveawayWinnerChannelId || "").trim();
@@ -312,21 +319,42 @@ console.log("📣 Posting winners to:", targetCh.id, targetCh.id === gwChannel.i
     allowedMentions: winners.length ? { users: winners } : undefined,
   }).catch((e) => console.error("❌ Winner post failed:", e?.stack || e));
 
-  // disable button on original giveaway message
-  try {
-    const msg = await gwChannel.messages.fetch(messageId);
-    const disabledRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`giveaway:enter:${messageId}`)
-        .setLabel("Giveaway Ended")
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(true)
-    );
-    await msg.edit({ components: [disabledRow] }).catch(() => {});
-  } catch {}
+  // disable button + update original giveaway message
+try {
+  const msg = await gwChannel.messages.fetch(messageId);
 
-  return { ok: true, winners };
+  // Disable the join button
+  const disabledRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`giveaway:enter:${messageId}`)
+      .setLabel("Giveaway Ended")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(true)
+  );
+
+  // Update the embed so it clearly shows ENDED
+  const originalEmbed = msg.embeds?.[0];
+  const endedEmbed = originalEmbed
+    ? EmbedBuilder.from(originalEmbed)
+        .setTitle(reroll ? "🔁 Giveaway Rerolled" : "🏁 Giveaway Ended")
+        .setTimestamp()
+    : new EmbedBuilder()
+        .setTitle("🏁 Giveaway Ended")
+        .setTimestamp();
+
+  await msg.edit({
+    embeds: [endedEmbed],
+    components: [disabledRow],
+  });
+
+  console.log("✅ Giveaway message updated & button disabled:", messageId);
+} catch (e) {
+  console.error(
+    "⚠️ Failed to update original giveaway message:",
+    e?.rawError || e?.message || e
+  );
 }
+
 
 // ✅ SINGLE sweep function (no duplicates)
 async function giveawaySweep(client) {
@@ -1462,6 +1490,7 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
+
 
 
 
