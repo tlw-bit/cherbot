@@ -524,66 +524,51 @@ function isRaffleFull(raffle) {
   return raffle.max > 0 && countClaimedSlots(raffle) >= raffle.max;
 }
 
-// -------------------- Board (EMBED ONLY) --------------------
-function formatBoardEmbed(raffle, mainKey = null, title = "🎟️ Raffle Board") {
+// -------------------- Board (EMBED ONLY) --------------------function formatBoardEmbed(raffle, mainKey = null, title = "🎟️ Raffle Board") {
   const closed = !raffle.active || isRaffleFull(raffle);
 
-  const claimed = [];
-  const available = [];
+  const max = Number(raffle.max) || 0;
+  const lines = [];
+  const availableNums = [];
 
-  for (let i = 1; i <= raffle.max; i++) {
+  for (let i = 1; i <= max; i++) {
     const owners = raffle.claims?.[String(i)];
+
     if (!owners || owners.length === 0) {
-      available.push(i);
+      availableNums.push(i);
+      lines.push(`**${i}.** _(available)_`);
       continue;
     }
 
     const users = owners.map((raw) => {
       const uid = normalizeUserId(raw) || raw;
-      const mark = mainKey && isMiniWinner(mainKey, uid) ? " Ⓜ️" : "";
+      const mark = mainKey && uid && isMiniWinner(mainKey, uid) ? " Ⓜ️" : "";
       return `<@${uid}>${mark}`;
     });
 
-    claimed.push(`**${i}.** ${users.join(" + ")}`);
+    lines.push(`**${i}.** ${users.join(" + ")}`);
   }
+
+  const header =
+    `🎟️ **${max} slots**` +
+    (raffle.priceText ? ` (**${raffle.priceText}**)` : "") +
+    (closed ? ` ✅ **FULL / CLOSED**` : "");
+
+  const availText = availableNums.length ? compressRanges(availableNums) : "None";
+
+  // chunk description if ever needed (discord embed desc limit is 4096)
+  const description = [header, "", ...lines].join("\n").slice(0, 4096);
 
   return new EmbedBuilder()
     .setTitle(title + (closed ? " • FULL" : ""))
     .setColor(closed ? 0xe74c3c : 0x2ecc71)
-    .addFields(
-      {
-        name: "✅ Claimed",
-        value: claimed.length ? claimed.join("\n").slice(0, 1024) : "_None yet_",
-      },
-      {
-        name: `🟢 Available (${available.length})`,
-        value: available.length ? compressRanges(available).slice(0, 1024) : "None",
-      }
-    )
+    .setDescription(description)
+    .addFields({
+      name: `🟢 Available (${availableNums.length})`,
+      value: String(availText).slice(0, 1024),
+    })
     .setFooter({ text: "Ⓜ️ = Mini winner • Type numbers to claim" })
     .setTimestamp();
-}
-
-async function postOrUpdateBoard(channel, raffle, mainKey = null, title = null) {
-  const embed = formatBoardEmbed(
-    raffle,
-    mainKey,
-    title || (data.miniThreads?.[channel.id] ? "🎲 Mini Board" : "🎟️ Main Board")
-  );
-
-  if (raffle.lastBoardMessageId) {
-    const msg = await channel.messages.fetch(raffle.lastBoardMessageId).catch(() => null);
-    if (msg) {
-      await msg.edit({ embeds: [embed], content: null }).catch(() => {});
-      return;
-    }
-  }
-
-  const sent = await channel.send({ embeds: [embed] }).catch(() => null);
-  if (sent) {
-    raffle.lastBoardMessageId = sent.id;
-    saveData(data);
-  }
 }
 
 // -------------------- Reservations (Mini claim window) --------------------
@@ -870,14 +855,28 @@ client.on("messageCreate", async (message) => {
       saveData(data);
 
       // Post the board
-      await postOrUpdateBoard(message.channel, raffle, mainKey, "🎟️ Main Board");
+     async function postOrUpdateBoard(channel, raffle, mainKey = null, title = null) {
+  const embed = formatBoardEmbed(
+    raffle,
+    mainKey,
+    title || (data.miniThreads?.[channel.id] ? "🎲 Mini Board" : "🎟️ Main Board")
+  );
 
-      // keep gamba ping for MAIN raffle start
-      const ping = gambaMention();
-      if (ping) await message.channel.send(ping).catch(() => {});
-
+  if (raffle.lastBoardMessageId) {
+    const msg = await channel.messages.fetch(raffle.lastBoardMessageId).catch(() => null);
+    if (msg) {
+      await msg.edit({ embeds: [embed], content: "" }).catch(() => {});
       return;
     }
+  }
+
+  const sent = await channel.send({ embeds: [embed] }).catch(() => null);
+  if (sent) {
+    raffle.lastBoardMessageId = sent.id;
+    saveData(data);
+  }
+}
+
 
     // -------------------- MINI CREATE --------------------
     const miniMatch = content.match(/^!mini\s+(\d+)\s*x(?:\s+(\d+))?\s*-\s*(\d+)\s*(?:c|coins?)$/i);
@@ -1583,17 +1582,23 @@ client.on("interactionCreate", async (interaction) => {
           allowedMentions: winnerUserIds.length ? { users: winnerUserIds, roles: [], everyone: false } : undefined,
         });
 
-        // Also post in winners channel if configured
-        const winnerCh = await getRaffleWinnersChannel(interaction.guild).catch(() => null);
-        if (winnerCh) {
-          await winnerCh
-            .send({
-              content: winnerText || "",
-              embeds: [embed],
-              allowedMentions: winnerUserIds.length ? { users: winnerUserIds, roles: [], everyone: false } : undefined,
-            })
-            .catch(() => {});
-        }
+     // Also post in winners channel if configured
+const winnerCh = await getRaffleWinnersChannel(interaction.guild).catch(() => null);
+if (winnerCh) {
+  const isMiniThread = Boolean(data.miniThreads?.[interaction.channelId]);
+
+  await winnerCh
+    .send({
+      // ✅ minis: no ping in winners channel
+      content: isMiniThread ? undefined : (winnerText || ""),
+      embeds: [embed],
+      allowedMentions: isMiniThread
+        ? { users: [], roles: [], everyone: false }
+        : (winnerUserIds.length ? { users: winnerUserIds, roles: [], everyone: false } : undefined),
+    })
+    .catch(() => {});
+}
+
 
         return;
       }
