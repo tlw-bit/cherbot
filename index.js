@@ -960,13 +960,10 @@ client.on("messageCreate", async (message) => {
       // ✅ Reserve the main slots for this mini immediately
       setReservation(mainKey, `mini:${miniThread.id}`, tickets, 24 * 60); // 24hr placeholder reservation
 
-      // ✅ NO @Gamba ping on mini creation
-      try {
-        await postOrUpdateBoard(miniThread, miniRaffle);
-      } catch (e) {
-        console.error("❌ CRITICAL: postOrUpdateBoard failed during mini creation:", e?.message || e);
-        await miniThread.send("⚠️ Error: Board failed to post. Check bot permissions.").catch(() => {});
-      }
+      // ✅ NO @Gamba ping on mini creation - POST BOARD FIRST
+      console.log("📢 About to post board to mini thread:", { miniThreadId: miniThread.id, miniSlots });
+      await postOrUpdateBoard(miniThread, miniRaffle);
+      console.log("✅ Board posted successfully");
 
       await miniThread.send(
         `🎲 **Mini created**\n` +
