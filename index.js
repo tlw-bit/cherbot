@@ -179,6 +179,15 @@ function gambaMention() {
   return rid ? `<@&${rid}>` : "";
 }
 
+async function getRaffleWinnersChannel(guild) {
+  const id = String(config.raffleWinnerChannelId || "").trim(); // add this to config.json
+  if (!id) return null;
+
+  const ch = await guild.channels.fetch(id).catch(() => null);
+  if (!ch || !ch.isTextBased?.()) return null;
+  return ch;
+}
+
 function giveawayMention() {
   const rid = String(config.giveawayRoleId || "").trim();
   return rid ? `<@&${rid}>` : "";
@@ -453,6 +462,24 @@ function markMiniWinner(mainKey, userId) {
   data.miniWinners[mainKey][userId] = true;
   saveData(data);
 }
+function compressRanges(numbers) {
+  const n = [...numbers].sort((a, b) => a - b);
+  const out = [];
+  let i = 0;
+
+  while (i < n.length) {
+    let start = n[i];
+    let end = start;
+    while (i + 1 < n.length && n[i + 1] === end + 1) {
+      i++;
+      end = n[i];
+    }
+    out.push(start === end ? `${start}` : `${start}-${end}`);
+    i++;
+  }
+
+  return out.join(", ");
+}
 
 function isMiniWinner(mainKey, userId) {
   ensureMiniWinners();
@@ -500,20 +527,25 @@ function getRaffle(guildId, channelId) {
   return r;
 }
 
-// ✅ blank price is NOT free
+// ✅ Strict free detection (prevents "10 coins" being treated as free)
 function isFreeRaffle(raffle) {
   const t = String(raffle.priceText || "").trim().toLowerCase();
   if (!t) return false;
-  return (
-    t === "free" ||
-    t === "0" ||
-    t === "0c" ||
-    t === "0 coin" ||
-    t === "0 coins" ||
-    t.includes("0 coin") ||
-    t.includes("0coin")
-  );
+
+  // explicit "free"
+  if (/^free\s*!?$/i.test(t)) return true;
+
+  // If it contains ANY non-zero digit, it's not free
+  // e.g. "10 coins", "20c", "100" => NOT FREE
+  if (/[1-9]/.test(t)) return false;
+
+  // At this point only 0's (or no digits) are present, so treat as free
+  // e.g. "0", "0c", "0 coins", "00 coins"
+  if (/\d/.test(t)) return true;
+
+  return false;
 }
+
 
 function parseCoinPriceFromText(text) {
   const t = String(text || "").toLowerCase();
@@ -664,10 +696,10 @@ function getAvailableNumbers(raffle) {
   return avail;
 }
 
-function formatAvailableList(avail, maxToShow = 40) {
+function formatAvailableList(avail, maxToShow = 80) {
   const shown = avail.slice(0, maxToShow);
   const more = avail.length > shown.length ? ` … (+${avail.length - shown.length} more)` : "";
-  return `${shown.join(", ")}${more}`;
+  return `${compressRanges(shown)}${more}`;
 }
 
 async function maybeAnnounceAvailable(channel, raffle) {
@@ -688,9 +720,10 @@ async function maybeAnnounceAvailable(channel, raffle) {
   if (!avail.length) return;
 
   await channel
-    .send(`🟢 **Available slots (${avail.length}):** ${formatAvailableList(avail, maxToShow)}`)
+    .send(`🟢 **Available (${avail.length})**: ${formatAvailableList(avail, maxToShow)}`)
     .catch(() => {});
 }
+
 
 // -------------------- Totals (auto when full) --------------------
 function computeTotals(raffle) {
@@ -844,7 +877,6 @@ client.on("messageCreate", async (message) => {
       const ping = gambaMention();
       if (ping) await message.channel.send(ping).catch(() => {});
 
-      await postOrUpdateBoard(message.channel, raffle, mainKey);
       await announceMainsLeftIfChanged(message.channel, raffle, mainKey);
 
       await message
@@ -932,65 +964,71 @@ client.on("messageCreate", async (message) => {
       return message.reply(`✅ Mini thread created: <#${miniThread.id}>`).catch(() => {});
     }
 
-    // -------------------- MINI DRAW (inside mini thread) --------------------
-    if (/^!minidraw$/i.test(content)) {
-      if (!isMod) return message.reply("❌ Mods only.").catch(() => {});
+// -------------------- MINI DRAW (inside mini thread) --------------------
+if (/^!minidraw$/i.test(content)) {
+  if (!isMod) return message.reply("❌ Mods only.").catch(() => {});
 
-      const meta = data.miniThreads?.[message.channel.id];
-      if (!meta) return message.reply("This isn’t a registered mini thread.").catch(() => {});
+  const meta = data.miniThreads?.[message.channel.id];
+  if (!meta) return message.reply("This isn’t a registered mini thread.").catch(() => {});
 
-      const miniRaffle = getRaffle(message.guild.id, message.channel.id);
+  const miniRaffle = getRaffle(message.guild.id, message.channel.id);
 
-      const pool = [];
-      for (const [slot, owners] of Object.entries(miniRaffle.claims || {})) {
-        if (!Array.isArray(owners) || owners.length === 0) continue;
-        for (const raw of owners) {
-          const uid = normalizeUserId(raw);
-          if (uid) pool.push({ slot, uid });
-        }
-      }
-
-      if (pool.length === 0) return message.reply("No one has claimed any mini slots.").catch(() => {});
-
-      const picked = pool[randInt(0, pool.length - 1)];
-      const winningNumber = picked.slot;
-      const winnerId = picked.uid;
-      if (!winnerId) return message.reply("Couldn’t pick a winner.").catch(() => {});
-
-      const minutes = Number(config.miniClaimWindowMinutes ?? 10);
-      const tickets = Number(meta.tickets || 1);
-      const mainKey = meta.mainKey;
-
-      markMiniWinner(mainKey, winnerId);
-
-      const mainThreadId = mainKey.split(":")[1];
-      const mainThread = await message.guild.channels.fetch(mainThreadId).catch(() => null);
-      if (!mainThread || !mainThread.isTextBased()) return message.reply("Main raffle thread not found.").catch(() => {});
-
-      setReservation(mainKey, winnerId, tickets, minutes);
-
-      const mainRaffle = getRaffle(message.guild.id, mainThread.id);
-      const left = computeMainsLeft(mainRaffle, mainKey);
-
-      // ✅ NO @Gamba ping on mini win
-      const contentToSend =
-        `🏆 **Mini winner:** <@${winnerId}> (won mini slot **#${winningNumber}**)\n` +
-        `🎟️ Claim **${tickets}** main number(s) in this thread.\n` +
-        `⏳ You have **${minutes} minutes**. Type numbers like: \`2 5 6\`\n` +
-        `📌 **${left} MAINS LEFT**\n\n- mini`;
-
-      await mainThread.send({
-        content: contentToSend,
-        allowedMentions: { users: [winnerId] },
-      }).catch(() => {});
-
-      await message.reply({
-        content: `🎉 Winner: <@${winnerId}> (slot #${winningNumber}). Tagged in the main thread.`,
-        allowedMentions: { users: [winnerId] },
-      }).catch(() => {});
-
-      return;
+  const pool = [];
+  for (const [slot, owners] of Object.entries(miniRaffle.claims || {})) {
+    if (!Array.isArray(owners) || owners.length === 0) continue;
+    for (const raw of owners) {
+      const uid = normalizeUserId(raw);
+      if (uid) pool.push({ slot, uid });
     }
+  }
+
+  if (pool.length === 0) return message.reply("No one has claimed any mini slots.").catch(() => {});
+
+  const picked = pool[randInt(0, pool.length - 1)];
+  const winningNumber = picked.slot;
+  const winnerId = picked.uid;
+  if (!winnerId) return message.reply("Couldn’t pick a winner.").catch(() => {});
+
+  const minutes = Number(config.miniClaimWindowMinutes ?? 10);
+  const tickets = Number(meta.tickets || 1);
+  const mainKey = meta.mainKey;
+
+  // ✅ mark winner (Ⓜ️) + reserve mains + refresh main board
+  markMiniWinner(mainKey, winnerId);
+
+  const mainThreadId = mainKey.split(":")[1];
+  const mainThread = await message.guild.channels.fetch(mainThreadId).catch(() => null);
+  if (!mainThread || !mainThread.isTextBased()) {
+    return message.reply("Main raffle thread not found.").catch(() => {});
+  }
+
+  setReservation(mainKey, winnerId, tickets, minutes);
+
+  const mainRaffle = getRaffle(message.guild.id, mainThread.id);
+  await postOrUpdateBoard(mainThread, mainRaffle, mainKey).catch(() => {});
+
+  // ✅ continue with your existing send/reply logic below...
+  const left = computeMainsLeft(mainRaffle, mainKey);
+
+  const contentToSend =
+    `🏆 **Mini winner:** <@${winnerId}> (won mini slot **#${winningNumber}**)\n` +
+    `🎟️ Claim **${tickets}** main number(s) in this thread.\n` +
+    `⏳ You have **${minutes} minutes**. Type numbers like: \`2 5 6\`\n` +
+    `📌 **${left} MAINS LEFT**\n\n- mini`;
+
+  await mainThread.send({
+    content: contentToSend,
+    allowedMentions: { users: [winnerId] },
+  }).catch(() => {});
+
+  await message.reply({
+    content: `🎉 Winner: <@${winnerId}> (slot #${winningNumber}). Tagged in the main thread.`,
+    allowedMentions: { users: [winnerId] },
+  }).catch(() => {});
+
+  return;
+}
+
 
     // -------------------- SPLIT (paid only) --------------------
     const splitMatch = content.match(/^!?split\s+(\d+)\s+<@!?(\d+)>$/i);
@@ -1503,55 +1541,63 @@ client.on("interactionCreate", async (interaction) => {
 
       return interaction.editReply({ content: "❌ Unknown subcommand." });
     }
+// ---------- /roll ----------
+if (interaction.commandName === "roll") {
+  const sides = Number(interaction.options.getString("die", true));
+  const result = randInt(1, sides);
 
-    // ---------- /roll ----------
-    if (interaction.commandName === "roll") {
-      const sides = Number(interaction.options.getString("die", true));
-      const result = randInt(1, sides);
+  const raffle = getRaffle(interaction.guildId, interaction.channelId);
+  const owners = raffle.claims?.[String(result)] || [];
+  const normalizedOwners = Array.isArray(owners)
+    ? owners.map(normalizeUserId).filter(Boolean)
+    : [];
 
-      const raffle = getRaffle(interaction.guildId, interaction.channelId);
-      const owners = raffle.claims?.[String(result)] || [];
-      const normalizedOwners = Array.isArray(owners) ? owners.map(normalizeUserId).filter(Boolean) : [];
+  // If this looks like a raffle draw (die matches raffle max), announce winner
+  if (raffle?.max === sides && raffle.max > 0) {
+    const winnerUserId = normalizedOwners.length ? normalizedOwners[0] : null;
 
-      if (raffle?.max === sides && raffle.max > 0) {
-        const winnerUserId = normalizedOwners.length ? normalizedOwners[0] : null;
+    const embed = new EmbedBuilder()
+      .setTitle("🎲 Raffle draw")
+      .setDescription(
+        winnerUserId
+          ? `Die: **d${sides}**\nWinning number: **#${result}**\nWinner: <@${winnerUserId}> 🎉`
+          : `Die: **d${sides}**\nWinning number: **#${result}**\nWinner: _(unclaimed)_ 😬`
+      )
+      .setTimestamp();
 
-        const embed = new EmbedBuilder()
-          .setTitle("🎲 Raffle draw")
-          .setDescription(
-            winnerUserId
-              ? `Die: **d${sides}**\nWinning number: **#${result}**\nWinner: <@${winnerUserId}> 🎉`
-              : `Die: **d${sides}**\nWinning number: **#${result}**\nWinner: _(unclaimed)_ 😬`
-          )
-          .setTimestamp();
+    // Reply in the channel where /roll was used
+    await interaction.reply({
+      content: winnerUserId ? `<@${winnerUserId}>` : "",
+      embeds: [embed],
+      allowedMentions: winnerUserId
+        ? { users: [winnerUserId], roles: [], everyone: false }
+        : undefined,
+    });
 
-        return interaction.reply({
-          content: winnerUserId ? `<@${winnerUserId}>` : "",
-          embeds: [embed],
-          allowedMentions: winnerUserId ? { users: [winnerUserId] } : undefined,
-        });
-      }
-
-      const embed = new EmbedBuilder()
-        .setTitle("🎲 Roll")
-        .setDescription(`Die: **d${sides}**\nResult: **${result}**`)
-        .setTimestamp();
-
-      return interaction.reply({ embeds: [embed] });
+    // ALSO post in winners channel/thread if configured
+    const winnerCh = await getRaffleWinnersChannel(interaction.guild).catch(() => null);
+    if (winnerCh) {
+      await winnerCh.send({
+        content: winnerUserId ? `<@${winnerUserId}>` : "",
+        embeds: [embed],
+        allowedMentions: winnerUserId
+          ? { users: [winnerUserId], roles: [], everyone: false }
+          : undefined,
+      }).catch(() => {});
     }
-  } catch (err) {
-    console.error("interactionCreate error:", err?.stack || err);
-    try {
-      if (interaction?.isRepliable?.()) {
-        if (interaction.deferred || interaction.replied) {
-          await interaction.editReply({ content: "❌ Something went wrong." }).catch(() => {});
-        } else {
-          await interaction.reply({ content: "❌ Something went wrong.", ephemeral: true }).catch(() => {});
-        }
-      }
-    } catch {}
+
+    return;
   }
-});
+
+  // Otherwise just a normal dice roll
+  const embed = new EmbedBuilder()
+    .setTitle("🎲 Roll")
+    .setDescription(`Die: **d${sides}**\nResult: **${result}**`)
+    .setTimestamp();
+
+  return interaction.reply({ embeds: [embed] });
+}
+
 
 // -------------------- Login --------------------
 const token = String(process.env.DISCORD_TOKEN || "").trim();
@@ -1560,4 +1606,5 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
+
 
