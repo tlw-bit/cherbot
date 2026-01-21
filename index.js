@@ -1017,7 +1017,7 @@ client.on("messageCreate", async (message) => {
 
   const picked = pool[randInt(0, pool.length - 1)];
   const winningNumber = picked.slot;
-  const winnerId = picked.uid;
+  const winnerId = String(picked.uid); // ✅ Ensure winnerId is a string
   if (!winnerId) return message.reply("Couldn’t pick a winner.").catch(() => {});
 
   const minutes = Number(config.miniClaimWindowMinutes ?? 10);
@@ -1040,6 +1040,14 @@ if (data.reservations[mainKey]?.[`mini:${message.channel.id}`]) {
 setReservation(mainKey, winnerId, tickets, minutes);
 
 const mainRaffle = getRaffle(message.guild.id, mainThread.id);
+
+// ✅ Add mini winner to main thread so they can claim their reserved slots
+try {
+  await mainThread.members.add(winnerId);
+  console.log("✅ Mini winner added to main thread:", winnerId);
+} catch (e) {
+  console.warn("⚠️ Failed to add mini winner to main thread:", e?.message || e);
+}
 
 // mark Ⓜ️ immediately
 await postOrUpdateBoard(mainThread, mainRaffle, mainKey, "🎟️ Main Board");
