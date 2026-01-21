@@ -730,6 +730,7 @@ function hasAnyActiveReservation(mainKey) {
 }
 
 
+
 // Locks the main raffle while ANY mini reservation is active.
 // Only the reserved winner (or mods) can claim during the lock.
 function isRaffleLockedForUser(mainKey, userId, isMod) {
@@ -740,17 +741,6 @@ function isRaffleLockedForUser(mainKey, userId, isMod) {
 
   const myRes = getReservation(mainKey, userId);
   return !myRes;
-}
-
-  for (const [uid, r] of Object.entries(bucket)) {
-    if (!r || now > r.expiresAt || r.remaining <= 0) {
-      delete bucket[uid];
-      continue;
-    }
-    total += Number(r.remaining) || 0;
-  }
-  saveData(data);
-  return total;
 }
 
 function computeMainsLeft(mainRaffle, mainKey) {
