@@ -617,6 +617,44 @@ async function postOrUpdateBoard(channel, raffle, mainKey = null) {
     saveData(data);
   }
 }
+function formatBoardEmbed(raffle, mainKey = null, title = "🎟️ Raffle Board") {
+  const closed = !raffle.active || isRaffleFull(raffle);
+
+  const claimed = [];
+  const available = [];
+
+  for (let i = 1; i <= raffle.max; i++) {
+    const owners = raffle.claims?.[String(i)];
+    if (!owners || owners.length === 0) {
+      available.push(i);
+      continue;
+    }
+
+    const users = owners.map((raw) => {
+      const uid = normalizeUserId(raw) || raw;
+      const mark = mainKey && isMiniWinner(mainKey, uid) ? " Ⓜ️" : "";
+      return `<@${uid}>${mark}`;
+    });
+
+    claimed.push(`**${i}.** ${users.join(" + ")}`);
+  }
+
+  return new EmbedBuilder()
+    .setTitle(title + (closed ? " • FULL" : ""))
+    .setColor(closed ? 0xE74C3C : 0x2ECC71)
+    .addFields(
+      {
+        name: "✅ Claimed",
+        value: claimed.length ? claimed.join("\n").slice(0, 1024) : "_None yet_",
+      },
+      {
+        name: `🟢 Available (${available.length})`,
+        value: available.length ? compressRanges(available).slice(0, 1024) : "None",
+      }
+    )
+    .setFooter({ text: "Ⓜ️ = Mini winner • Type numbers to claim" })
+    .setTimestamp();
+}
 
 // -------------------- Reservations (mini winners claim window) --------------------
 function getReservation(mainKey, userId) {
@@ -659,6 +697,18 @@ function reservedTotal(mainKey) {
 
   const now = Date.now();
   let total = 0;
+
+  for (const [uid, r] of Object.entries(bucket)) {
+    if (!r || now > r.expiresAt || r.remaining <= 0) {
+      delete bucket[uid];
+      continue;
+    }
+    total += Number(r.remaining) || 0;
+  }
+
+  saveData(data);
+  return total;
+}
 function hasAnyActiveReservation(mainKey) {
   ensureRaffleData();
   const bucket = data.reservations?.[mainKey];
@@ -678,6 +728,7 @@ function hasAnyActiveReservation(mainKey) {
   saveData(data);
   return active;
 }
+
 
 // Locks the main raffle while ANY mini reservation is active.
 // Only the reserved winner (or mods) can claim during the lock.
@@ -732,8 +783,7 @@ function formatAvailableList(avail, maxToShow = 80) {
   const more = avail.length > shown.length ? ` … (+${avail.length - shown.length} more)` : "";
   return `${compressRanges(shown)}${more}`;
 }
-
-async function maybeAnnounceAvailable(channel, raffle) {
+ {
   const afterClaimed = Number(config.availableAfterClaimed ?? 10);
   const every = Number(config.availableAnnounceEvery ?? 5);
   const maxToShow = Number(config.availableMaxToShow ?? 40);
@@ -904,24 +954,31 @@ client.on("messageCreate", async (message) => {
       raffle.createdAt = Date.now();
       saveData(data);
 
-   // keep gamba ping for MAIN raffle start
+  // keep gamba ping for MAIN raffle start
 const ping = gambaMention();
 if (ping) await message.channel.send(ping).catch(() => {});
 
-// ✅ Post the board immediately
-await postOrUpdateBoard(message.channel, raffle, mainKey).catch(() => {});
-await announceMainsLeftIfChanged(message.channel, raffle, mainKey);
+async function postOrUpdateBoard(channel, raffle, mainKey = null, title) {
+  const embed = formatBoardEmbed(
+    raffle,
+    mainKey,
+    title || (data.miniThreads?.[channel.id] ? "🎲 Mini Board" : "🎟️ Main Board")
+  );
 
-
-      await message
-        .reply(
-          `✅ Raffle started: **${max} slots**` +
-            (priceText ? ` (**${priceText}**)` : "") +
-            `. Type numbers to claim.`
-        )
-        .catch(() => {});
+  if (raffle.lastBoardMessageId) {
+    const msg = await channel.messages.fetch(raffle.lastBoardMessageId).catch(() => null);
+    if (msg) {
+      await msg.edit({ embeds: [embed], content: null }).catch(() => {});
       return;
     }
+  }
+
+  const sent = await channel.send({ embeds: [embed] }).catch(() => null);
+  if (sent) {
+    raffle.lastBoardMessageId = sent.id;
+    saveData(data);
+  }
+}
 
     // -------------------- MINI CREATE --------------------
     const miniMatch = content.match(/^!mini\s+(\d+)\s*x(?:\s+(\d+))?\s*-\s*(\d+)\s*(?:c|coins?)$/i);
@@ -994,6 +1051,16 @@ await announceMainsLeftIfChanged(message.channel, raffle, mainKey);
           `✅ **${tickets} main slot(s) reserved for this mini**\n` +
           `📌 **${computeMainsLeft(getRaffle(message.guild.id, message.channel.id), mainKey)} MAINS LEFT**`
       ).catch(() => {});
+function autoFillRemainingMains(mainRaffle, winnerId, maxTickets) {
+  const available = getAvailableNumbers(mainRaffle);
+  const toClaim = available.slice(0, maxTickets);
+
+  for (const n of toClaim) {
+    mainRaffle.claims[String(n)] = [winnerId];
+  }
+
+  return toClaim;
+}
 
       return message.reply(`✅ Mini thread created: <#${miniThread.id}>`).catch(() => {});
     }
@@ -1038,31 +1105,43 @@ if (!mainThread || !mainThread.isTextBased()) {
 setReservation(mainKey, winnerId, tickets, minutes);
 
 const mainRaffle = getRaffle(message.guild.id, mainThread.id);
-await postOrUpdateBoard(mainThread, mainRaffle, mainKey).catch(() => {});
 
-// ✅ continue with your existing send/reply logic below...
-const left = computeMainsLeft(mainRaffle, mainKey);
+// mark Ⓜ️ immediately
+await postOrUpdateBoard(mainThread, mainRaffle, mainKey, "🎟️ Main Board");
 
-// ✅ Put the mention at the very start so it DEFINITELY pings
-const contentToSend =
-  `<@${winnerId}>\n` +
-  `🏆 **Mini winner** (won mini slot **#${winningNumber}**)\n` +
-  `🎟️ Claim **${tickets}** main number(s) in this thread.\n` +
-  `⏳ You have **${minutes} minutes**. Type numbers like: \`2 5 6\`\n` +
-  `📌 **${left} MAINS LEFT**\n\n- mini`;
+// check if mini should finish the main
+const mainsLeft = getAvailableNumbers(mainRaffle).length;
+let autoClaimed = [];
 
-await mainThread.send({
-  content: contentToSend,
-  allowedMentions: { users: [winnerId] }, // ✅ ensures the ping isn't suppressed
-}).catch(() => {});
+if (tickets >= mainsLeft && mainsLeft > 0) {
+  autoClaimed = autoFillRemainingMains(mainRaffle, winnerId, tickets);
+  useReservation(mainKey, winnerId, autoClaimed.length);
+  saveData(data);
 
-  await message.reply({
-    content: `🎉 Winner: <@${winnerId}> (slot #${winningNumber}). Tagged in the main thread.`,
+  await postOrUpdateBoard(mainThread, mainRaffle, mainKey, "🎟️ Main Board");
+
+  await mainThread.send({
+    content:
+      `<@${winnerId}>\n` +
+      `🏆 **Mini Winner!** (slot #${winningNumber})\n\n` +
+      `⚡ **Auto-filled final mains:** ${autoClaimed.join(", ")}\n` +
+      `✅ Main raffle is now **FULL**`,
     allowedMentions: { users: [winnerId] },
-  }).catch(() => {});
+  });
 
+  await handleFullRaffle(mainThread, mainRaffle);
   return;
 }
+
+// otherwise normal claim window
+await mainThread.send({
+  content:
+    `<@${winnerId}>\n` +
+    `🏆 **Mini Winner!** (slot #${winningNumber})\n` +
+    `🎟️ Claim **${tickets}** main slot(s)\n` +
+    `⏳ **${minutes} minutes** — others are paused`,
+  allowedMentions: { users: [winnerId] },
+});
 
 
     // -------------------- SPLIT (paid only) --------------------
@@ -1165,8 +1244,6 @@ if (isRaffleLockedForUser(mainKey, message.author.id, isMod)) {
       await message.reply(`✅ You claimed the rest.`).catch(() => {});
       await message.react("✅").catch(() => {});
 
-      await maybeAnnounceAvailable(message.channel, raffle).catch(() => {});
-
       if (isRaffleFull(raffle)) {
         await handleFullRaffle(message.channel, raffle);
       }
@@ -1242,8 +1319,6 @@ if (isRaffleLockedForUser(mainKey, message.author.id, isMod)) {
 
         await message.react("✅").catch(() => {});
         if (taken.length) await message.react("⚠️").catch(() => {});
-
-        await maybeAnnounceAvailable(message.channel, raffle).catch(() => {});
 
         if (isRaffleFull(raffle)) {
           await handleFullRaffle(message.channel, raffle);
