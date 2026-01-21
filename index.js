@@ -462,6 +462,12 @@ function markMiniWinner(mainKey, userId) {
   data.miniWinners[mainKey][userId] = true;
   saveData(data);
 }
+
+function isMiniWinner(mainKey, userId) {
+  ensureMiniWinners();
+  return Boolean(data.miniWinners?.[mainKey]?.[userId]);
+}
+
 function compressRanges(numbers) {
   const n = [...numbers].sort((a, b) => a - b);
   const out = [];
@@ -479,11 +485,6 @@ function compressRanges(numbers) {
   }
 
   return out.join(", ");
-}
-
-function isMiniWinner(mainKey, userId) {
-  ensureMiniWinners();
-  return Boolean(data.miniWinners?.[mainKey]?.[userId]);
 }
 
 function getRaffle(guildId, channelId) {
@@ -508,49 +509,7 @@ function getRaffle(guildId, channelId) {
     saveData(data);
   }
 
-  const r = data.raffles[key];
-
-  // migrations
-  if (typeof r.slotPrice === "undefined") r.slotPrice = null;
-  if (typeof r.totalsPosted === "undefined") r.totalsPosted = false;
-  if (typeof r.hostId === "undefined") r.hostId = null;
-  if (typeof r.fullNotified === "undefined") r.fullNotified = false;
-  if (typeof r.lastAvailableAnnouncedClaimed === "undefined") r.lastAvailableAnnouncedClaimed = null;
-
-  // migrate string -> array
-  if (r?.claims && typeof r.claims === "object") {
-    for (const [num, v] of Object.entries(r.claims)) {
-      if (typeof v === "string") r.claims[num] = [v];
-    }
-  }
-
-  return r;
-}
-
-// ✅ Strict free detection (prevents "10 coins" being treated as free)
-function isFreeRaffle(raffle) {
-  const t = String(raffle.priceText || "").trim().toLowerCase();
-  if (!t) return false;
-
-  // explicit "free"
-  if (/^free\s*!?$/i.test(t)) return true;
-
-  // If it contains ANY non-zero digit, it's not free
-  // e.g. "10 coins", "20c", "100" => NOT FREE
-  if (/[1-9]/.test(t)) return false;
-
-  // At this point only 0's (or no digits) are present, so treat as free
-  // e.g. "0", "0c", "0 coins", "00 coins"
-  if (/\d/.test(t)) return true;
-
-  return false;
-}
-
-
-function parseCoinPriceFromText(text) {
-  const t = String(text || "").toLowerCase();
-  const m = t.match(/(\d+)/);
-  return m ? Number(m[1]) : null;
+  return data.raffles[key];
 }
 
 function countClaimedSlots(raffle) {
@@ -565,58 +524,7 @@ function isRaffleFull(raffle) {
   return raffle.max > 0 && countClaimedSlots(raffle) >= raffle.max;
 }
 
-function countUserClaims(raffle, userId) {
-  let c = 0;
-  for (const owners of Object.values(raffle.claims || {})) {
-    if (Array.isArray(owners) && owners.includes(userId)) c++;
-  }
-  return c;
-}
-
-// Board (supports Ⓜ️ if mainKey provided)
-function formatBoardText(raffle, mainKey = null) {
-  const closed = !raffle.active || isRaffleFull(raffle);
-  const status = closed ? " ✅ **FULL / CLOSED**" : "";
-  const header =
-    `🎟️ Raffle: **${raffle.max} slots**` +
-    (raffle.priceText ? ` (**${raffle.priceText}**)` : "") +
-    status;
-
-  const lines = [];
-  for (let i = 1; i <= raffle.max; i++) {
-    const owners = raffle.claims[String(i)];
-    if (!owners || owners.length === 0) {
-      lines.push(`${i}. _(available)_`);
-    } else {
-      const formatted = owners.map((raw) => {
-        const uid = normalizeUserId(raw) || raw;
-        const mark = mainKey && uid && isMiniWinner(mainKey, uid) ? " Ⓜ️" : "";
-        return `<@${uid}>${mark}`;
-      });
-      lines.push(`${i}. ${formatted.join(" + ")}`);
-    }
-  }
-
-  return `${header}\n\n${lines.join("\n")}`.slice(0, 1900);
-}
-
-async function postOrUpdateBoard(channel, raffle, mainKey = null) {
-  const text = formatBoardText(raffle, mainKey);
-
-  if (raffle.lastBoardMessageId) {
-    const msg = await channel.messages.fetch(raffle.lastBoardMessageId).catch(() => null);
-    if (msg) {
-      await msg.edit({ content: text }).catch(() => {});
-      return;
-    }
-  }
-
-  const posted = await channel.send({ content: text }).catch(() => null);
-  if (posted) {
-    raffle.lastBoardMessageId = posted.id;
-    saveData(data);
-  }
-}
+// -------------------- Board (EMBED ONLY) --------------------
 function formatBoardEmbed(raffle, mainKey = null, title = "🎟️ Raffle Board") {
   const closed = !raffle.active || isRaffleFull(raffle);
 
@@ -641,7 +549,7 @@ function formatBoardEmbed(raffle, mainKey = null, title = "🎟️ Raffle Board"
 
   return new EmbedBuilder()
     .setTitle(title + (closed ? " • FULL" : ""))
-    .setColor(closed ? 0xE74C3C : 0x2ECC71)
+    .setColor(closed ? 0xe74c3c : 0x2ecc71)
     .addFields(
       {
         name: "✅ Claimed",
@@ -656,10 +564,31 @@ function formatBoardEmbed(raffle, mainKey = null, title = "🎟️ Raffle Board"
     .setTimestamp();
 }
 
-// -------------------- Reservations (mini winners claim window) --------------------
+async function postOrUpdateBoard(channel, raffle, mainKey = null, title = null) {
+  const embed = formatBoardEmbed(
+    raffle,
+    mainKey,
+    title || (data.miniThreads?.[channel.id] ? "🎲 Mini Board" : "🎟️ Main Board")
+  );
+
+  if (raffle.lastBoardMessageId) {
+    const msg = await channel.messages.fetch(raffle.lastBoardMessageId).catch(() => null);
+    if (msg) {
+      await msg.edit({ embeds: [embed], content: null }).catch(() => {});
+      return;
+    }
+  }
+
+  const sent = await channel.send({ embeds: [embed] }).catch(() => null);
+  if (sent) {
+    raffle.lastBoardMessageId = sent.id;
+    saveData(data);
+  }
+}
+
+// -------------------- Reservations (Mini claim window) --------------------
 function getReservation(mainKey, userId) {
-  ensureRaffleData();
-  const bucket = data.reservations[mainKey];
+  const bucket = data.reservations?.[mainKey];
   if (!bucket || !bucket[userId]) return null;
 
   const r = bucket[userId];
@@ -672,7 +601,6 @@ function getReservation(mainKey, userId) {
 }
 
 function setReservation(mainKey, userId, remaining, minutes) {
-  ensureRaffleData();
   if (!data.reservations[mainKey]) data.reservations[mainKey] = {};
   data.reservations[mainKey][userId] = {
     remaining,
@@ -690,63 +618,31 @@ function useReservation(mainKey, userId, used) {
   return r;
 }
 
-function reservedTotal(mainKey) {
-  ensureRaffleData();
-  const bucket = data.reservations[mainKey];
-  if (!bucket) return 0;
-
-  const now = Date.now();
-  let total = 0;
-
-  for (const [uid, r] of Object.entries(bucket)) {
-    if (!r || now > r.expiresAt || r.remaining <= 0) {
-      delete bucket[uid];
-      continue;
-    }
-    total += Number(r.remaining) || 0;
-  }
-
-  saveData(data);
-  return total;
-}
 function hasAnyActiveReservation(mainKey) {
-  ensureRaffleData();
   const bucket = data.reservations?.[mainKey];
   if (!bucket) return false;
 
   const now = Date.now();
-  let active = false;
-
-  for (const [uid, r] of Object.entries(bucket)) {
-    if (!r || now > r.expiresAt || r.remaining <= 0) {
-      delete bucket[uid]; // clean expired
-      continue;
-    }
-    active = true;
+  for (const r of Object.values(bucket)) {
+    if (r && now < r.expiresAt && r.remaining > 0) return true;
   }
-
-  saveData(data);
-  return active;
+  return false;
 }
 
-
-
-// Locks the main raffle while ANY mini reservation is active.
-// Only the reserved winner (or mods) can claim during the lock.
 function isRaffleLockedForUser(mainKey, userId, isMod) {
   if (isMod) return false;
-
-  // If there is any active reservation, you must be the reserved user to claim.
   if (!hasAnyActiveReservation(mainKey)) return false;
-
-  const myRes = getReservation(mainKey, userId);
-  return !myRes;
+  return !getReservation(mainKey, userId);
 }
 
+// -------------------- Mains left helpers --------------------
 function computeMainsLeft(mainRaffle, mainKey) {
-  const reserved = reservedTotal(mainKey);
+  const reserved = Object.values(data.reservations?.[mainKey] || {})
+    .filter((r) => r && r.remaining > 0 && Date.now() < r.expiresAt)
+    .reduce((a, b) => a + b.remaining, 0);
+
   const claimed = countClaimedSlots(mainRaffle);
-  return Math.max(0, (Number(mainRaffle.max) || 0) - claimed - reserved);
+  return Math.max(0, mainRaffle.max - claimed - reserved);
 }
 
 async function announceMainsLeftIfChanged(channel, mainRaffle, mainKey) {
