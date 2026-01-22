@@ -1,4 +1,4 @@
-// deploy-commands.js (CLEAN)
+// deploy-commands.js (CLEAN + SAFE)
 // Registers slash commands to ONE guild (guild commands update fast)
 
 const { REST, Routes, SlashCommandBuilder, PermissionFlagsBits } = require("discord.js");
@@ -6,10 +6,6 @@ const config = require("./config.json");
 
 // FORCE: env token only (prevents config.json accidentally overriding)
 const token = String(process.env.DISCORD_TOKEN || "").trim();
-
-console.log("token length:", token.length);
-console.log("token starts:", token.slice(0, 6));
-console.log("token ends:", token.slice(-6));
 
 if (!token) {
   console.error("❌ No DISCORD_TOKEN env var found.");
@@ -56,7 +52,9 @@ const commands = [
     .setName("xpreset")
     .setDescription("Reset or set a user's XP/level (mods only)")
     .addUserOption((opt) => opt.setName("user").setDescription("User to reset").setRequired(true))
-    .addIntegerOption((opt) => opt.setName("level").setDescription("Level to set (default: 1)").setRequired(false))
+    .addIntegerOption((opt) =>
+      opt.setName("level").setDescription("Level to set (default: 1)").setRequired(false).setMinValue(1)
+    )
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 
   new SlashCommandBuilder()
@@ -77,7 +75,9 @@ const commands = [
         .setDescription("Start a giveaway")
         .addStringOption((opt) => opt.setName("prize").setDescription("Prize name").setRequired(true))
         .addStringOption((opt) => opt.setName("duration").setDescription("Duration like 10m, 2h, 1d").setRequired(true))
-        .addIntegerOption((opt) => opt.setName("winners").setDescription("Number of winners (1–50)").setRequired(true))
+        .addIntegerOption((opt) =>
+          opt.setName("winners").setDescription("Number of winners (1–50)").setRequired(true).setMinValue(1).setMaxValue(50)
+        )
         .addUserOption((opt) => opt.setName("sponsor").setDescription("Who is sponsoring this giveaway?").setRequired(false))
         .addBooleanOption((opt) => opt.setName("ping").setDescription("Ping the giveaway role? (default: true)").setRequired(false))
     )
@@ -107,17 +107,13 @@ const commands = [
     .addIntegerOption((opt) =>
       opt.setName("slot").setDescription("Slot number to assign").setRequired(true).setMinValue(1)
     )
-    .addUserOption((opt) =>
-      opt.setName("user").setDescription("User to receive this slot").setRequired(true)
-    )
-    .addUserOption((opt) =>
-      opt.setName("user2").setDescription("Optional second user (split, paid raffles only)").setRequired(false)
-    ),
+    .addUserOption((opt) => opt.setName("user").setDescription("User to receive this slot").setRequired(true))
+    .addUserOption((opt) => opt.setName("user2").setDescription("Optional second user (split, paid raffles only)").setRequired(false)),
 
-  // /roll
+  // /roll (now includes d100, d200, d500)
   new SlashCommandBuilder()
     .setName("roll")
-    .setDescription("Roll a die (d4, d6, d8, d10, d20, d50)")
+    .setDescription("Roll a die (d4, d6, d8, d10, d20, d50, d100, d200, d500)")
     .addStringOption((opt) =>
       opt
         .setName("die")
@@ -129,7 +125,10 @@ const commands = [
           { name: "d8", value: "8" },
           { name: "d10", value: "10" },
           { name: "d20", value: "20" },
-          { name: "d50", value: "50" }
+          { name: "d50", value: "50" },
+          { name: "d100", value: "100" },
+          { name: "d200", value: "200" },
+          { name: "d500", value: "500" }
         )
     ),
 ].map((c) => c.toJSON());
@@ -138,11 +137,11 @@ const rest = new REST({ version: "10" }).setToken(token);
 
 (async () => {
   try {
-    console.log("🚀 Deploying slash commands...");
+    console.log("🚀 Deploying slash commands to guild:", guildId);
     await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: commands });
     console.log("✅ Slash commands deployed successfully.");
   } catch (err) {
-    console.error("❌ Failed to deploy commands:", err);
+    console.error("❌ Failed to deploy commands:", err?.rawError || err?.message || err);
+    process.exit(1);
   }
 })();
-
