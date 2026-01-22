@@ -1360,7 +1360,18 @@ raffle.hostId = String(hostId);
 
         taken.push(n);
       }
-if (!claimed.length) return message.reply("❌ None claimed.").catch(() => {});
+// ❌ If nothing was claimed but some numbers were unavailable, react with ❌
+if (!claimed.length && taken.length) {
+  await message.react("❌").catch(() => {});
+  return;
+}
+
+// (safety fallback, shouldn’t normally happen)
+if (!claimed.length) {
+  await message.react("❌").catch(() => {});
+  return;
+}
+
 
 // ✅ Mark ONLY the mini winner’s free entitlement slots as Ⓜ️ (works even after time limit)
 if (isMiniWinner(mainKey, message.author.id)) {
@@ -1582,6 +1593,7 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
+
 
 
 
