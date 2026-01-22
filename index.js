@@ -850,6 +850,7 @@ client.on("messageCreate", async (message) => {
     if (content.toLowerCase() === "!code") {
       return message.reply(`🧾 Cherbot code: **${makeToyCode()}**`).catch(() => {});
     }
+
 // -------------------- MAIN RAFFLE START --------------------
 const startMatch = content.match(/^!(\d+)\s+slots(?:\s+(.+))?$/i);
 if (startMatch && inMainRaffleChannel) {
@@ -861,28 +862,29 @@ if (startMatch && inMainRaffleChannel) {
   }
 
   const max = Number(startMatch[1]);
-  let priceText = (startMatch[2]?.trim() || "");
+  let tail = (startMatch[2]?.trim() || ""); // everything after "slots"
 
-  // optional timer anywhere in the tail: "!100 slots 1h 50c" OR "!100 slots 50c 1h"
-  let durationMs = null;
-  const durationMatch = priceText.match(/(\d+)\s*([mhd])/i);
-  if (durationMatch) {
-    durationMs = parseDurationToMs(durationMatch[0]);
-    priceText = priceText.replace(durationMatch[0], "").trim();
+  // ✅ Allow only 1..500
+  if (!Number.isFinite(max) || max < 1 || max > 500) {
+    return message.reply("Pick a slot amount between 1 and 500.").catch(() => {});
   }
 
-  // ✅ parse price ONCE
-  const parsedSlotPrice = parseCoinPriceFromText(priceText);
+  // --- Pull out optional duration token like 10m / 2h / 1d anywhere in tail ---
+  let durationMs = null;
+  const dur = tail.match(/(?:^|\s)(\d+\s*[mhd])(?:\s|$)/i);
+  if (dur) {
+    durationMs = parseDurationToMs(dur[1]);
+    tail = tail.replace(dur[1], "").replace(/\s+/g, " ").trim();
+  }
 
-  // ✅ if they typed *anything* after slots, it must include a valid price like "50c"
-  if (priceText && parsedSlotPrice === 0) {
+  // --- Parse price from remaining tail ---
+  const parsedSlotPrice = parseCoinPriceFromText(tail);
+
+  // ✅ If they typed anything after slots, it MUST contain a valid price like "50c"
+  if (tail && parsedSlotPrice === 0) {
     return message
       .reply("❌ Price format not recognised. Use something like `50c` (example: `!100 slots 50c`).")
       .catch(() => {});
-  }
-
-  if (!Number.isFinite(max) || max < 1 || max > 500) {
-    return message.reply("Pick a slot amount between 1 and 500.").catch(() => {});
   }
 
   const raffle = getRaffle(message.guild.id, message.channel.id);
@@ -895,10 +897,10 @@ if (startMatch && inMainRaffleChannel) {
 
   raffle.active = true;
   raffle.max = max;
-  raffle.priceText = priceText;
-  raffle.slotPrice = parsedSlotPrice; // ✅ do NOT overwrite this later
-  raffle.totalsPosted = false;
+  raffle.priceText = tail;
+  raffle.slotPrice = parsedSlotPrice;
 
+  raffle.totalsPosted = false;
   raffle.claims = {};
   raffle.lastBoardMessageId = null;
   raffle.lastMainsLeftAnnounced = null;
@@ -926,44 +928,6 @@ if (startMatch && inMainRaffleChannel) {
   return;
 }
 
-
-
-      // reset mini winners for this main raffle
-      const mainKey = raffleKey(message.guild.id, message.channel.id);
-      ensureMiniWinners();
-      data.miniWinners[mainKey] = {};
-      saveData(data);
-
-      raffle.active = true;
-      raffle.max = max;
-      raffle.priceText = priceText;
-      raffle.slotPrice = parseCoinPriceFromText(priceText);
-      raffle.totalsPosted = false;
-
-      raffle.claims = {};
-      raffle.lastBoardMessageId = null;
-      raffle.lastMainsLeftAnnounced = null;
-      raffle.lastAvailableAnnouncedClaimed = null;
-
-      raffle.hostId = String(message.author.id);
-      raffle.fullNotified = false;
-      raffle.createdAt = Date.now();
-
-      if (durationMs) raffle.endsAt = Date.now() + durationMs;
-      else delete raffle.endsAt;
-
-      saveData(data);
-
-      await postOrUpdateBoard(message.channel, raffle, mainKey, "🎟️ Main Board");
-      await announceMainsLeftIfChanged(message.channel, raffle, mainKey).catch(() => {});
-
-      if (raffle.endsAt) {
-        scheduleGiveawayEnd(client, `mainraffle:${message.channel.id}`, raffle.endsAt);
-        await message.channel.send(`⏲️ **Timer set:** Main raffle auto-ends <t:${Math.floor(raffle.endsAt / 1000)}:R>`).catch(() => {});
-      }
-
-      return;
-    }
 
     // -------------------- MINI CREATE --------------------
     const miniMatch = content.match(/^!mini\s+(\d+)\s*x(?:\s+(\d+))?\s*-\s*(\d+)\s*(?:c|coins?)$/i);
@@ -1413,5 +1377,6 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
+
 
 
