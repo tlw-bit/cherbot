@@ -657,10 +657,12 @@ function hasAnyActiveReservation(mainKey) {
 function isRaffleLockedForUser(mainKey, userId, isMod) {
   if (isMod) return false;
   if (!hasAnyActiveReservation(mainKey)) return false;
-  // Allow the mini winner with an active reservation to claim
+  // Allow the user with an active reservation to claim
   const res = getReservation(mainKey, userId);
   if (res && res.remaining > 0 && Date.now() < res.expiresAt) return false;
-  return !getReservation(mainKey, userId);
+  
+  // Block other users if there are active reservations
+  return true;
 }
 
 // -------------------- Mains left helpers --------------------
@@ -1327,7 +1329,20 @@ if (isRaffleLockedForUser(mainKey, message.author.id, isMod)) {
 
 // ⛔ Pause other claims while a mini winner has an active claim window
 if (isRaffleLockedForUser(mainKey, message.author.id, isMod)) {
-  console.warn("⚠️ User locked out:", { userId: message.author.id, mainKey });
+  console.warn("⚠️ User locked out:", { 
+    userId: message.author.id, 
+    mainKey,
+    isMiniWinner: isMiniWinner(mainKey, message.author.id),
+    hasReservation: !!res
+  });
+  
+  // Special message for mini winners whose reservation expired
+  if (isMiniWinner(mainKey, message.author.id)) {
+    return message
+      .reply("⛔ Your mini winner claim window has expired. Please wait for the current reservation to finish, then you can claim available slots.")
+      .catch(() => {});
+  }
+  
   return message
     .reply("⛔ A mini winner is currently claiming reserved mains. Please wait a few minutes.")
     .catch(() => {});
