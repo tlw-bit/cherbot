@@ -316,9 +316,27 @@ async function endGiveawayByMessageId(client, messageId, { reroll = false } = {}
   // Stop any scheduled timer for this giveaway
   clearGiveawayTimer(messageId);
 
-  const g = data.giveaways?.[messageId];
-  if (!g) return { ok: false, reason: "Giveaway not found." };
-  if (g.ended && !reroll) return { ok: false, reason: "Giveaway already ended." };
+  // Support main raffle auto-end
+  let g = data.giveaways?.[messageId];
+  let isMainRaffle = false;
+  let mainRaffle = null;
+  if (!g && messageId.startsWith('mainraffle:')) {
+    // Main raffle auto-end
+    const channelId = messageId.split(':')[1];
+    // Find the main raffle by channelId
+    for (const [key, r] of Object.entries(data.raffles || {})) {
+      if (key.endsWith(`:${channelId}`)) {
+        mainRaffle = r;
+        break;
+      }
+    }
+    if (mainRaffle) {
+      isMainRaffle = true;
+      g = mainRaffle;
+    }
+  }
+  if (!g) return { ok: false, reason: isMainRaffle ? "Main raffle not found." : "Giveaway not found." };
+  if (g.ended && !reroll) return { ok: false, reason: isMainRaffle ? "Main raffle already ended." : "Giveaway already ended." };
 
   console.log("🏁 endGiveawayByMessageId:", {
     messageId,
@@ -343,61 +361,81 @@ async function endGiveawayByMessageId(client, messageId, { reroll = false } = {}
 
   g.ended = true;
   g.endedAt = Date.now();
-  g.lastWinners = winners;
-  data.giveaways[messageId] = g;
+  if (!isMainRaffle) {
+    g.lastWinners = winners;
+    data.giveaways[messageId] = g;
+  } else {
+    // Mark main raffle inactive and post full message
+    g.active = false;
+    g.fullNotified = true;
+    // Remove timer
+    delete g.endsAt;
+  }
   saveData(data);
 
-  const prize = g.prize || "Giveaway";
-  const winnerText = winners.length
-    ? winners.map((id) => `<@${id}>`).join(", ")
-    : "_No valid entries_";
+  if (!isMainRaffle) {
+    const prize = g.prize || "Giveaway";
+    const winnerText = winners.length
+      ? winners.map((id) => `<@${id}>`).join(", ")
+      : "_No valid entries_";
 
-  const endedUnix = Math.floor((g.endedAt || Date.now()) / 1000);
+    const endedUnix = Math.floor((g.endedAt || Date.now()) / 1000);
 
-  // Winners announcement embed (winners channel)
-  const announceEmbed = new EmbedBuilder()
-    .setTitle(reroll ? "🔁 Giveaway Rerolled" : "🏁 Giveaway Ended")
-    .setDescription(
-      `**Prize:** ${prize}\n` +
-      `**Winners:** ${winnerText}\n` +
-      `**Ended:** <t:${endedUnix}:F>`
-    )
-    .setTimestamp();
+    // Winners announcement embed (winners channel)
+    const announceEmbed = new EmbedBuilder()
+      .setTitle(reroll ? "🔁 Giveaway Rerolled" : "🏁 Giveaway Ended")
+      .setDescription(
+        `**Prize:** ${prize}\n` +
+        `**Winners:** ${winnerText}\n` +
+        `**Ended:** <t:${endedUnix}:F>`
+      )
+      .setTimestamp();
 
-  const winnerChannelId = String(config.giveawayWinnerChannelId || "").trim();
+    const winnerChannelId = String(config.giveawayWinnerChannelId || "").trim();
 
-  let winCh = null;
-  if (winnerChannelId) {
-    try {
-      winCh = await guild.channels.fetch(winnerChannelId);
-      console.log("✅ Winners channel fetched:", {
-        id: winCh.id,
-        type: winCh.type,
-        isTextBased: !!winCh.isTextBased?.(),
-        name: winCh.name,
-      });
-    } catch (e) {
-      console.error(
-        "❌ Failed to fetch winners channel:",
-        winnerChannelId,
-        e?.rawError || e?.message || e
-      );
+    let winCh = null;
+    if (winnerChannelId) {
+      try {
+        winCh = await guild.channels.fetch(winnerChannelId);
+        console.log("✅ Winners channel fetched:", {
+          id: winCh.id,
+          type: winCh.type,
+          isTextBased: !!winCh.isTextBased?.(),
+          name: winCh.name,
+        });
+      } catch (e) {
+        console.error(
+          "❌ Failed to fetch winners channel:",
+          winnerChannelId,
+          e?.rawError || e?.message || e
+        );
+      }
+    }
+
+    const targetCh = winCh && winCh.isTextBased?.() ? winCh : gwChannel;
+
+    console.log(
+      "📣 Posting winners to:",
+      targetCh.id,
+      targetCh.id === gwChannel.id ? "(FALLBACK to giveaway channel)" : "(winners channel)"
+    );
+
+    await targetCh.send({
+      content: winners.length ? winnerText : "",
+      embeds: [announceEmbed],
+      allowedMentions: winners.length ? { users: winners } : undefined,
+    }).catch((e) => console.error("❌ Winner post failed:", e?.stack || e));
+  } else {
+    // Main raffle auto-end: post full message and board
+    const channelId = messageId.split(':')[1];
+    const guild = client.guilds.cache.find(g => g.channels.cache.has(channelId));
+    const mainThread = guild ? guild.channels.cache.get(channelId) : null;
+    if (mainThread && mainThread.isTextBased()) {
+      await postOrUpdateBoard(mainThread, g, raffleKey(guild.id, channelId), "🎟️ Main Board");
+      await handleFullRaffle(mainThread, g);
+      await mainThread.send(`⏲️ **Timer ended:** Main raffle auto-closed at <t:${Math.floor(g.endedAt/1000)}:F>`).catch(() => {});
     }
   }
-
-  const targetCh = winCh && winCh.isTextBased?.() ? winCh : gwChannel;
-
-  console.log(
-    "📣 Posting winners to:",
-    targetCh.id,
-    targetCh.id === gwChannel.id ? "(FALLBACK to giveaway channel)" : "(winners channel)"
-  );
-
-  await targetCh.send({
-    content: winners.length ? winnerText : "",
-    embeds: [announceEmbed],
-    allowedMentions: winners.length ? { users: winners } : undefined,
-  }).catch((e) => console.error("❌ Winner post failed:", e?.stack || e));
 
   // disable button + update original giveaway message (SHOW winners in the embed)
   try {
@@ -618,6 +656,9 @@ function hasAnyActiveReservation(mainKey) {
 function isRaffleLockedForUser(mainKey, userId, isMod) {
   if (isMod) return false;
   if (!hasAnyActiveReservation(mainKey)) return false;
+  // Allow the mini winner with an active reservation to claim
+  const res = getReservation(mainKey, userId);
+  if (res && res.remaining > 0 && Date.now() < res.expiresAt) return false;
   return !getReservation(mainKey, userId);
 }
 
@@ -637,6 +678,22 @@ async function announceMainsLeftIfChanged(channel, mainRaffle, mainKey) {
   mainRaffle.lastMainsLeftAnnounced = left;
   saveData(data);
   await channel.send(`📌 **${left} MAINS LEFT**`).catch(() => {});
+}
+
+// -------------------- Mini Winner Ping Helper --------------------
+async function pingMiniWinnerInMain(mainThread, winnerId, winningNumber, tickets, minutes) {
+  // Always mention the winner and allow them to claim
+  return mainThread.send({
+    content:
+      `<@${winnerId}>\n` +
+      `🏆 **Mini Winner!** (slot #${winningNumber})\n` +
+      `🎟️ Claim **${tickets}** main slot(s)\n` +
+      `⏳ **${minutes} minutes** — others are paused`,
+    allowedMentions: { users: [winnerId] },
+  }).catch((e) => {
+    console.error("❌ Failed to send mini winner claim message:", e?.message || e);
+    return null;
+  });
 }
 
 // -------------------- Available slots announcements --------------------
@@ -865,7 +922,15 @@ client.on("messageCreate", async (message) => {
       }
 
       const max = Number(startMatch[1]);
-      const priceText = (startMatch[2]?.trim() || "");
+      let priceText = (startMatch[2]?.trim() || "");
+
+      // Support optional timer: e.g. "!100 slots 1h 50c" or "!100 slots 50c 1h"
+      let durationMs = null;
+      let durationMatch = priceText.match(/(\d+\s*[mhd])/i);
+      if (durationMatch) {
+        durationMs = parseDurationToMs(durationMatch[1]);
+        priceText = priceText.replace(durationMatch[1], '').trim();
+      }
 
       if (!Number.isFinite(max) || max < 1 || max > 500) {
         return message.reply("Pick a slot amount between 1 and 500.").catch(() => {});
@@ -894,14 +959,26 @@ client.on("messageCreate", async (message) => {
       raffle.fullNotified = false;
 
       raffle.createdAt = Date.now();
+      // Add endsAt if timer specified
+      if (durationMs) {
+        raffle.endsAt = Date.now() + durationMs;
+      } else {
+        delete raffle.endsAt;
+      }
       saveData(data);
 
       // Post the board
       await postOrUpdateBoard(message.channel, raffle, mainKey);
 
-      // keep gamba ping for MAIN raffle start
-      const ping = gambaMention();
-      if (ping) await message.channel.send(ping).catch(() => {});
+      // Schedule auto-end if timer set
+      if (raffle.endsAt) {
+        scheduleGiveawayEnd(client, `mainraffle:${message.channel.id}`, raffle.endsAt);
+        await message.channel.send(`⏲️ **Timer set:** Main raffle will auto-end <t:${Math.floor(raffle.endsAt/1000)}:R>`).catch(() => {});
+      }
+
+      // ✅ GAMBA PING DISABLED FOR TESTING
+      // const ping = gambaMention();
+      // if (ping) await message.channel.send(ping).catch(() => {});
 
       return;
     }
@@ -1079,24 +1156,19 @@ let autoClaimed = [];
       // otherwise normal claim window
       console.log("📢 Sending mini winner claim message:", { winnerId, tickets, minutes, mainThreadId });
       
-      const claimMsg = await mainThread.send({
-        content:
-          `<@${winnerId}>\n` +
-          `🏆 **Mini Winner!** (slot #${winningNumber})\n` +
-          `🎟️ Claim **${tickets}** main slot(s)\n` +
-          `⏳ **${minutes} minutes** — others are paused`,
-        allowedMentions: { users: [winnerId] },
-      }).catch((e) => {
-        console.error("❌ Failed to send mini winner claim message:", e?.message || e);
-        return null;
-      });
-
+      const claimMsg = await pingMiniWinnerInMain(mainThread, winnerId, winningNumber, tickets, minutes);
       if (claimMsg) {
         console.log("✅ Mini winner message sent successfully:", { messageId: claimMsg.id, winnerId });
+        // Always ping the mini winner again after 5 minutes to remind them
+        setTimeout(async () => {
+          await mainThread.send({
+            content: `<@${winnerId}> ⏰ You have 5 minutes left to claim your reserved main slots!`,
+            allowedMentions: { users: [winnerId] },
+          }).catch(() => {});
+        }, 5 * 60 * 1000); // 5 minutes
       } else {
         console.error("⚠️ Mini winner message failed to send", { winnerId, mainThreadId, tickets, minutes });
       }
-
       return;
     }
 
@@ -1700,37 +1772,6 @@ if (!isMini) {
         }
       }
     } catch {}
-  }
-});
-
-// -------------------- New Member Welcome --------------------
-client.on("guildMemberAdd", async (member) => {
-  try {
-    const welcomeChannelId = "1456962809425559613";
-    const verifyChannelId = "1462386529765691473";
-
-    const welcomeChannel = await member.guild.channels.fetch(welcomeChannelId).catch(() => null);
-    const verifyChannel = await member.guild.channels.fetch(verifyChannelId).catch(() => null);
-
-    if (!welcomeChannel || !welcomeChannel.isTextBased()) return;
-
-    const embed = new EmbedBuilder()
-      .setTitle("👋 Welcome!")
-      .setDescription(
-        `Welcome to the server, <@${member.id}>!\n\n` +
-        `Please head to <#${verifyChannelId}> to verify and get started.`
-      )
-      .setColor(0x2ecc71)
-      .setThumbnail(member.user.displayAvatarURL())
-      .setTimestamp();
-
-    await welcomeChannel.send({
-      content: `<@${member.id}>`,
-      embeds: [embed],
-      allowedMentions: { users: [member.id] },
-    }).catch(() => {});
-  } catch (err) {
-    console.error("guildMemberAdd error:", err?.stack || err);
   }
 });
 
