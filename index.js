@@ -630,6 +630,7 @@ function setReservation(mainKey, userId, remaining, minutes) {
     remaining,
     expiresAt: Date.now() + minutes * 60 * 1000,
   };
+  console.log("✅ Reservation set:", { mainKey, userId, remaining, minutes });
   saveData(data);
 }
 
@@ -656,10 +657,12 @@ function hasAnyActiveReservation(mainKey) {
 function isRaffleLockedForUser(mainKey, userId, isMod) {
   if (isMod) return false;
   if (!hasAnyActiveReservation(mainKey)) return false;
-  // Allow the mini winner with an active reservation to claim
+  // Allow the user with an active reservation to claim
   const res = getReservation(mainKey, userId);
   if (res && res.remaining > 0 && Date.now() < res.expiresAt) return false;
-  return !getReservation(mainKey, userId);
+  
+  // Block all other users when there are active reservations (e.g., mini winner claiming)
+  return true;
 }
 
 // -------------------- Mains left helpers --------------------
@@ -686,8 +689,9 @@ async function pingMiniWinnerInMain(mainThread, winnerId, winningNumber, tickets
   return mainThread.send({
     content:
       `<@${winnerId}>\n` +
-      `🏆 **Mini Winner!** (slot #${winningNumber})\n` +
-      `🎟️ Claim **${tickets}** main slot(s)\n` +
+      `🏆 **You won the mini!** (slot #${winningNumber})\n` +
+      `🎟️ **Pick ${tickets} slot(s) on the main raffle**\n` +
+      `💬 Type the numbers you want (e.g., "5 12 27")\n` +
       `⏳ **${minutes} minutes** — others are paused`,
     allowedMentions: { users: [winnerId] },
   }).catch((e) => {
@@ -1143,8 +1147,8 @@ let autoClaimed = [];
         await mainThread.send({
           content:
             `<@${winnerId}>\n` +
-            `🏆 **Mini Winner!** (slot #${winningNumber})\n\n` +
-            `⚡ **Auto-filled final mains:** ${autoClaimed.join(", ")}\n` +
+            `🏆 **You won the mini!** (slot #${winningNumber})\n\n` +
+            `⚡ **Auto-filled your final main slots:** ${autoClaimed.join(", ")}\n` +
             `✅ Main raffle is now **FULL**`,
           allowedMentions: { users: [winnerId] },
         }).catch((e) => console.error("❌ Failed to send mini winner auto-fill message:", e?.message || e));
@@ -1159,13 +1163,22 @@ let autoClaimed = [];
       const claimMsg = await pingMiniWinnerInMain(mainThread, winnerId, winningNumber, tickets, minutes);
       if (claimMsg) {
         console.log("✅ Mini winner message sent successfully:", { messageId: claimMsg.id, winnerId });
-        // Always ping the mini winner again after 5 minutes to remind them
+        // Remind the mini winner halfway through their claim window
+        const ONE_MINUTE_MS = 60 * 1000;
+        const claimWindowMs = minutes * ONE_MINUTE_MS;
+        const reminderDelay = Math.max(ONE_MINUTE_MS, claimWindowMs / 2); // At least 1 minute, or half the claim window
         setTimeout(async () => {
-          await mainThread.send({
-            content: `<@${winnerId}> ⏰ You have 5 minutes left to claim your reserved main slots!`,
-            allowedMentions: { users: [winnerId] },
-          }).catch(() => {});
-        }, 5 * 60 * 1000); // 5 minutes
+          // Calculate actual time remaining from now
+          const res = getReservation(mainKey, winnerId);
+          if (res && res.expiresAt) {
+            const timeLeftMs = res.expiresAt - Date.now();
+            const timeLeftMin = Math.max(1, Math.ceil(timeLeftMs / ONE_MINUTE_MS));
+            await mainThread.send({
+              content: `<@${winnerId}> ⏰ You have ~${timeLeftMin} minute(s) left to pick your main slots! Type the numbers you want.`,
+              allowedMentions: { users: [winnerId] },
+            }).catch(() => {});
+          }
+        }, reminderDelay);
       } else {
         console.error("⚠️ Mini winner message failed to send", { winnerId, mainThreadId, tickets, minutes });
       }
@@ -1305,6 +1318,16 @@ if (isRaffleLockedForUser(mainKey, message.author.id, isMod)) {
         const claimedCount = countClaimedSlots(raffle);
         const availableCount = Math.max(0, raffle.max - claimedCount - totalReserved);
         
+        console.log("🔍 Claim attempt:", {
+          userId: message.author.id,
+          mainKey,
+          hasReservation: !!res,
+          reservationRemaining: res?.remaining,
+          totalReserved,
+          availableCount,
+          isMod
+        });
+        
         if (availableCount <= 0 && !res) {
           return message
             .reply("⛔ All slots are currently reserved. A mini winner is claiming reserved mains. Please wait.")
@@ -1313,6 +1336,20 @@ if (isRaffleLockedForUser(mainKey, message.author.id, isMod)) {
 
 // ⛔ Pause other claims while a mini winner has an active claim window
 if (isRaffleLockedForUser(mainKey, message.author.id, isMod)) {
+  console.warn("⚠️ User locked out:", { 
+    userId: message.author.id, 
+    mainKey,
+    isMiniWinner: isMiniWinner(mainKey, message.author.id),
+    hasReservation: !!res
+  });
+  
+  // Special message for mini winners whose reservation expired
+  if (isMiniWinner(mainKey, message.author.id)) {
+    return message
+      .reply("⛔ Your mini winner claim window has expired. Please wait for the current reservation to finish, then you can claim available slots.")
+      .catch(() => {});
+  }
+  
   return message
     .reply("⛔ A mini winner is currently claiming reserved mains. Please wait a few minutes.")
     .catch(() => {});
