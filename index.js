@@ -624,43 +624,52 @@ function getReservation(mainKey, userId) {
   return r;
 }
 
+function reservationKey(userId) {
+  const s = String(userId || "");
+  if (s.startsWith("mini:")) return s;              // keep placeholder keys intact
+  return normalizeUserId(s) || s;                   // normalize real users
+}
+
+function getReservation(mainKey, userId) {
+  const bucket = data.reservations?.[mainKey];
+  if (!bucket) return null;
+
+  const k = reservationKey(userId);
+  if (!bucket[k]) return null;
+
+  const r = bucket[k];
+  if (Date.now() > r.expiresAt || r.remaining <= 0) {
+    delete bucket[k];
+    saveData(data);
+    return null;
+  }
+  return r;
+}
+
 function setReservation(mainKey, userId, remaining, minutes) {
   if (!data.reservations[mainKey]) data.reservations[mainKey] = {};
-  data.reservations[mainKey][userId] = {
+
+  const k = reservationKey(userId);
+  data.reservations[mainKey][k] = {
     remaining,
     expiresAt: Date.now() + minutes * 60 * 1000,
   };
+
+  console.log("✅ Reservation set:", { mainKey, userId, keyStoredAs: k, remaining, minutes });
   saveData(data);
 }
 
 function useReservation(mainKey, userId, used) {
-  const r = getReservation(mainKey, userId);
+  const k = reservationKey(userId);
+  const r = getReservation(mainKey, k);
   if (!r) return null;
+
   r.remaining -= used;
-  if (r.remaining <= 0) delete data.reservations[mainKey][userId];
+  if (r.remaining <= 0) delete data.reservations[mainKey][k];
   saveData(data);
   return r;
 }
 
-function hasAnyActiveReservation(mainKey) {
-  const bucket = data.reservations?.[mainKey];
-  if (!bucket) return false;
-
-  const now = Date.now();
-  for (const r of Object.values(bucket)) {
-    if (r && now < r.expiresAt && r.remaining > 0) return true;
-  }
-  return false;
-}
-
-function isRaffleLockedForUser(mainKey, userId, isMod) {
-  if (isMod) return false;
-  if (!hasAnyActiveReservation(mainKey)) return false;
-  // Allow the mini winner with an active reservation to claim
-  const res = getReservation(mainKey, userId);
-  if (res && res.remaining > 0 && Date.now() < res.expiresAt) return false;
-  return !getReservation(mainKey, userId);
-}
 
 // -------------------- Mains left helpers --------------------
 function computeMainsLeft(mainRaffle, mainKey) {
@@ -682,14 +691,16 @@ async function announceMainsLeftIfChanged(channel, mainRaffle, mainKey) {
 
 // -------------------- Mini Winner Ping Helper --------------------
 async function pingMiniWinnerInMain(mainThread, winnerId, winningNumber, tickets, minutes) {
-  // Always mention the winner and allow them to claim
+  const content =
+    `<@${winnerId}>\n` +
+    `🏆 **You won the mini!** (slot #${winningNumber})\n` +
+    `🎟️ **Pick ${tickets} slot(s) on the main raffle**\n` +
+    `💬 Type the numbers you want (e.g., \`5 12 27\`)\n` +
+    `⏳ **${minutes} minutes** — others are paused`;
+
   return mainThread.send({
-    content:
-      `<@${winnerId}>\n` +
-      `🏆 **Mini Winner!** (slot #${winningNumber})\n` +
-      `🎟️ Claim **${tickets}** main slot(s)\n` +
-      `⏳ **${minutes} minutes** — others are paused`,
-    allowedMentions: { users: [winnerId] },
+    content,
+    allowedMentions: { parse: ["users"] }, // 👈 simplest + most reliable for user mentions
   }).catch((e) => {
     console.error("❌ Failed to send mini winner claim message:", e?.message || e);
     return null;
@@ -1284,14 +1295,37 @@ if (isRaffleLockedForUser(mainKey, message.author.id, isMod)) {
     const looksLikeNumberClaim = nums.length > 0 && content.replace(/[0-9,\s]/g, "") === "";
 
     if (looksLikeNumberClaim) {
-      const raffle = getRaffle(message.guild.id, message.channel.id);
-      if (raffle.active && raffle.max > 0) {
-        const uniqueNums = [...new Set(nums)];
-        const invalid = uniqueNums.filter((n) => n < 1 || n > raffle.max);
-        if (invalid.length) {
-          await message.reply(`Pick numbers between 1 and ${raffle.max}. Invalid: ${invalid.join(", ")}`).catch(() => {});
-          return;
-        }
+   const mainKey = raffleKey(message.guild.id, message.channel.id);
+const res = getReservation(mainKey, message.author.id);
+const freeMode = isFreeRaffle(raffle);
+
+// 1) lock check FIRST (this uses getReservation internally too)
+if (isRaffleLockedForUser(mainKey, message.author.id, isMod)) {
+  if (isMiniWinner(mainKey, message.author.id) && !res) {
+    return message
+      .reply("⛔ Your mini winner claim window has expired. Please wait for the current reservation to finish, then you can claim available slots.")
+      .catch(() => {});
+  }
+  return message
+    .reply("⛔ A mini winner is currently claiming reserved mains. Please wait a few minutes.")
+    .catch(() => {});
+}
+
+// 2) now compute reserved/available counts
+const totalReserved = Object.values(data.reservations?.[mainKey] || {})
+  .filter((r) => r && r.remaining > 0 && Date.now() < r.expiresAt)
+  .reduce((a, b) => a + b.remaining, 0);
+
+const claimedCount = countClaimedSlots(raffle);
+const availableCount = Math.max(0, raffle.max - claimedCount - totalReserved);
+
+// 3) only block if the user does NOT have a reservation
+if (availableCount <= 0 && !res) {
+  return message
+    .reply("⛔ All slots are currently reserved. A mini winner is claiming reserved mains. Please wait.")
+    .catch(() => {});
+}
+
 
         const mainKey = raffleKey(message.guild.id, message.channel.id);
         const res = getReservation(mainKey, message.author.id);
@@ -1782,4 +1816,5 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
+
 
