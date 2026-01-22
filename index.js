@@ -907,7 +907,7 @@ if (startMatch && inMainRaffleChannel) {
   raffle.lastAvailableAnnouncedClaimed = null;
 
 const hostId = message.channel.ownerId || message.author.id;
-raffle.hostId = String(hostId);
+raffle.hostId = String(message.author.id);
 
   raffle.fullNotified = false;
   raffle.createdAt = Date.now();
@@ -1326,6 +1326,38 @@ client.on("interactionCreate", async (interaction) => {
     // ---------- Buttons ----------
     if (interaction.isButton()) {
       const id = interaction.customId;
+     await interaction.deferReply().catch(() => {}); // public
+
+
+      if (id.startsWith("giveaway:enter:")) {
+        ensureGiveawayData();
+
+        const messageId = id.split(":")[2];
+        const g = data.giveaways?.[messageId];
+
+        if (!g) return interaction.editReply({ content: "❌ This giveaway no longer exists." });
+        if (g.ended) return interaction.editReply({ content: "❌ This giveaway has ended." });
+
+        if (!Array.isArray(g.participants)) g.participants = [];
+        if (g.participants.includes(interaction.user.id)) {
+          return interaction.editReply({ content: "✅ You’re already entered!" });
+        }
+
+        g.participants.push(interaction.user.id);
+        data.giveaways[messageId] = g;
+        saveData(data);
+
+        return interaction.editReply({ content: `✅ Entered! Entries: **${g.participants.length}**` });
+      }
+
+      return interaction.editReply({ content: "❌ Unknown button." }).catch(() => {});
+    }
+// -------------------- Interactions (buttons + slash commands) --------------------
+client.on("interactionCreate", async (interaction) => {
+  try {
+    // ---------- Buttons ----------
+    if (interaction.isButton()) {
+      const id = interaction.customId;
       await interaction.deferReply({ ephemeral: true }).catch(() => {});
 
       if (id.startsWith("giveaway:enter:")) {
@@ -1354,11 +1386,77 @@ client.on("interactionCreate", async (interaction) => {
 
     // ---------- Slash Commands ----------
     if (!interaction.isChatInputCommand()) return;
-const name = interaction.commandName;
 
-if (name === "roll") {
-  // always respond fast
-  await interaction.deferReply({ ephemeral: true }).catch(() => {});
+    const name = interaction.commandName;
+
+    if (name === "roll") {
+      // public reply (everyone can see it)
+      await interaction.deferReply().catch(() => {});
+
+      // mod check
+      const member = interaction.member;
+      const isMod = isModMember(member);
+      if (!isMod) return interaction.editReply("❌ Mods only.");
+
+      // must be used in a thread/channel that has a raffle record
+      const raffle = getRaffle(interaction.guildId, interaction.channelId);
+      if (!raffle?.max) return interaction.editReply("❌ No raffle found in this channel/thread.");
+      if (!isRaffleFull(raffle)) return interaction.editReply("❌ Raffle isn’t full yet.");
+
+      // build entry pool (1 entry per claimed slot, split slots give multiple entries)
+      const pool = [];
+      for (const [slot, owners] of Object.entries(raffle.claims || {})) {
+        if (!Array.isArray(owners) || owners.length === 0) continue;
+        for (const raw of owners) {
+          const uid = normalizeUserId(raw);
+          if (uid) pool.push({ slot, uid });
+        }
+      }
+
+      if (!pool.length) return interaction.editReply("❌ No valid entries to roll from.");
+
+      const picked = pool[randInt(0, pool.length - 1)];
+      const winningSlot = picked.slot;
+      const winnerId = picked.uid;
+
+      // ✅ ALWAYS announce in the channel/thread where the command was run
+      await interaction.channel.send({
+        content: `🎲 **ROLL RESULT**\n🏆 Winner: <@${winnerId}>\n🎟️ Winning slot: **#${winningSlot}**`,
+        allowedMentions: { users: [winnerId] },
+      }).catch(() => {});
+
+      // ✅ OPTIONAL: also mirror to winners channel
+      const winnersCh = await getRaffleWinnersChannel(interaction.guild).catch(() => null);
+      if (winnersCh && winnersCh.id !== interaction.channelId) {
+        await winnersCh.send({
+          content: `🎲 **ROLL RESULT** (from <#${interaction.channelId}>)\n🏆 Winner: <@${winnerId}>\n🎟️ Winning slot: **#${winningSlot}**`,
+          allowedMentions: { users: [winnerId] },
+        }).catch(() => {});
+      }
+
+      // public interaction reply
+      return interaction.editReply(`✅ Rolled! Winner: <@${winnerId}> (slot #${winningSlot}).`);
+    }
+
+    // put any other slash commands here later...
+    // if (name === "assign") { ... }
+    // if (name === "free") { ... }
+
+  } catch (err) {
+    console.error("interactionCreate error:", err?.stack || err);
+    try {
+      if (interaction?.isRepliable?.()) {
+        if (interaction.deferred || interaction.replied) {
+          await interaction.editReply({ content: "❌ Something went wrong." }).catch(() => {});
+        } else {
+          await interaction.reply({ content: "❌ Something went wrong.", ephemeral: true }).catch(() => {});
+        }
+      }
+    } catch {}
+  }
+});
+
+
 
   // mod check
   const member = interaction.member;
@@ -1422,6 +1520,7 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
+
 
 
 
