@@ -1493,7 +1493,6 @@ client.on("interactionCreate", async (interaction) => {
   }).catch(() => {});
 
   return interaction.editReply(`✅ Rolled! Winner: <@${winnerId}> (slot #${winningSlot}).`);
-}
 
     // NOTE: keep your /assign /free /giveaway /roll handlers here
     // (you already had them below in your old file; paste them back if you removed them)
@@ -1519,6 +1518,7 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
+
 
 
 
