@@ -1346,12 +1346,11 @@ client.on("interactionCreate", async (interaction) => {
         g.participants.push(interaction.user.id);
         data.giveaways[messageId] = g;
         saveData(data);
+return interaction.editReply({ content: "❌ Unknown button." }).catch(() => {});
+}
 
-        return interaction.editReply({ content: `✅ Entered! Entries: **${g.participants.length}**` });
-      }
+} // 👈 CLOSES: if (interaction.isButton())
 
-      return interaction.editReply({ content: "❌ Unknown button." }).catch(() => {});
-    }
 // -------------------- Interactions (buttons + slash commands) --------------------
 client.on("interactionCreate", async (interaction) => {
   try {
@@ -1520,6 +1519,7 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
+
 
 
 
