@@ -850,8 +850,6 @@ client.on("messageCreate", async (message) => {
     if (content.toLowerCase() === "!code") {
       return message.reply(`🧾 Cherbot code: **${makeToyCode()}**`).catch(() => {});
     }
-
-    // -------------------- MAIN RAFFLE START --------------------
 // -------------------- MAIN RAFFLE START --------------------
 const startMatch = content.match(/^!(\d+)\s+slots(?:\s+(.+))?$/i);
 if (startMatch && inMainRaffleChannel) {
@@ -865,19 +863,18 @@ if (startMatch && inMainRaffleChannel) {
   const max = Number(startMatch[1]);
   let priceText = (startMatch[2]?.trim() || "");
 
-  // Support optional timer: e.g. "!100 slots 1h 50c" or "!100 slots 50c 1h"
+  // optional timer anywhere in the tail: "!100 slots 1h 50c" OR "!100 slots 50c 1h"
   let durationMs = null;
-  const durationMatch = priceText.match(/(\d+\s*[mhd])/i);
+  const durationMatch = priceText.match(/(\d+)\s*([mhd])/i);
   if (durationMatch) {
-    durationMs = parseDurationToMs(durationMatch[1]);
-    priceText = priceText.replace(durationMatch[1], "").trim();
+    durationMs = parseDurationToMs(durationMatch[0]);
+    priceText = priceText.replace(durationMatch[0], "").trim();
   }
 
-  // ✅ parse price BEFORE setting raffle fields
+  // ✅ parse price ONCE
   const parsedSlotPrice = parseCoinPriceFromText(priceText);
 
-  // ✅ If they typed something but we couldn't parse a price, block it
-  // (prevents it turning into "FREE" accidentally)
+  // ✅ if they typed *anything* after slots, it must include a valid price like "50c"
   if (priceText && parsedSlotPrice === 0) {
     return message
       .reply("❌ Price format not recognised. Use something like `50c` (example: `!100 slots 50c`).")
@@ -899,7 +896,7 @@ if (startMatch && inMainRaffleChannel) {
   raffle.active = true;
   raffle.max = max;
   raffle.priceText = priceText;
-  raffle.slotPrice = parsedSlotPrice; // ✅ correct value (0 if truly free)
+  raffle.slotPrice = parsedSlotPrice; // ✅ do NOT overwrite this later
   raffle.totalsPosted = false;
 
   raffle.claims = {};
@@ -911,49 +908,24 @@ if (startMatch && inMainRaffleChannel) {
   raffle.fullNotified = false;
   raffle.createdAt = Date.now();
 
-  // Add endsAt if timer specified
-  if (durationMs) {
-    raffle.endsAt = Date.now() + durationMs;
-  } else {
-    delete raffle.endsAt;
-  }
+  if (durationMs) raffle.endsAt = Date.now() + durationMs;
+  else delete raffle.endsAt;
 
   saveData(data);
 
-  // Post the board
-  await postOrUpdateBoard(message.channel, raffle, mainKey);
+  await postOrUpdateBoard(message.channel, raffle, mainKey, "🎟️ Main Board");
+  await announceMainsLeftIfChanged(message.channel, raffle, mainKey).catch(() => {});
 
-  // Schedule auto-end if timer set
   if (raffle.endsAt) {
     scheduleGiveawayEnd(client, `mainraffle:${message.channel.id}`, raffle.endsAt);
     await message.channel
-      .send(`⏲️ **Timer set:** Main raffle will auto-end <t:${Math.floor(raffle.endsAt / 1000)}:R>`)
+      .send(`⏲️ **Timer set:** Main raffle auto-ends <t:${Math.floor(raffle.endsAt / 1000)}:R>`)
       .catch(() => {});
   }
 
   return;
 }
 
-
-// ✅ parse price BEFORE setting raffle fields
-const parsedSlotPrice = parseCoinPriceFromText(priceText);
-
-// ✅ If they typed something but we couldn't parse a price, block it
-if (priceText && parsedSlotPrice === 0) {
-  return message
-    .reply("❌ Price format not recognised. Use something like `50c` (example: `!100 slots 50c`).")
-    .catch(() => {});
-}
-
-if (!Number.isFinite(max) || max < 1 || max > 500) {
-  return message.reply("Pick a slot amount between 1 and 500.").catch(() => {});
-}
-
-const raffle = getRaffle(message.guild.id, message.channel.id);
-
-// ... then later when you set raffle fields:
-raffle.priceText = priceText;
-raffle.slotPrice = parsedSlotPrice;
 
 
       // reset mini winners for this main raffle
@@ -1441,4 +1413,5 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
+
 
