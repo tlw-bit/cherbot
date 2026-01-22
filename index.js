@@ -906,7 +906,9 @@ if (startMatch && inMainRaffleChannel) {
   raffle.lastMainsLeftAnnounced = null;
   raffle.lastAvailableAnnouncedClaimed = null;
 
-  raffle.hostId = String(message.author.id);
+const hostId = message.channel.ownerId || message.author.id;
+raffle.hostId = String(hostId);
+
   raffle.fullNotified = false;
   raffle.createdAt = Date.now();
 
@@ -1352,6 +1354,49 @@ client.on("interactionCreate", async (interaction) => {
 
     // ---------- Slash Commands ----------
     if (!interaction.isChatInputCommand()) return;
+const name = interaction.commandName;
+
+if (name === "roll") {
+  // always respond fast
+  await interaction.deferReply({ ephemeral: true }).catch(() => {});
+
+  // mod check
+  const member = interaction.member;
+  const isMod = isModMember(member);
+  if (!isMod) return interaction.editReply("❌ Mods only.");
+
+  // must be used in a thread/channel that has a raffle record
+  const raffle = getRaffle(interaction.guildId, interaction.channelId);
+  if (!raffle?.max) return interaction.editReply("❌ No raffle found in this channel/thread.");
+  if (!isRaffleFull(raffle)) return interaction.editReply("❌ Raffle isn’t full yet.");
+
+  // build entry pool (1 entry per claimed slot, split slots give multiple entries)
+  const pool = [];
+  for (const [slot, owners] of Object.entries(raffle.claims || {})) {
+    if (!Array.isArray(owners) || owners.length === 0) continue;
+    for (const raw of owners) {
+      const uid = normalizeUserId(raw);
+      if (uid) pool.push({ slot, uid });
+    }
+  }
+
+  if (!pool.length) return interaction.editReply("❌ No valid entries to roll from.");
+
+  const picked = pool[randInt(0, pool.length - 1)];
+  const winningSlot = picked.slot;
+  const winnerId = picked.uid;
+
+  // announce in raffle winners channel if set, else current channel
+  const winnersCh = await getRaffleWinnersChannel(interaction.guild).catch(() => null);
+  const announceCh = winnersCh || interaction.channel;
+
+  await announceCh.send({
+    content: `🎲 **ROLL RESULT**\n🏆 Winner: <@${winnerId}>\n🎟️ Winning slot: **#${winningSlot}**`,
+    allowedMentions: { users: [winnerId] },
+  }).catch(() => {});
+
+  return interaction.editReply(`✅ Rolled! Winner: <@${winnerId}> (slot #${winningSlot}).`);
+}
 
     // NOTE: keep your /assign /free /giveaway /roll handlers here
     // (you already had them below in your old file; paste them back if you removed them)
@@ -1377,6 +1422,7 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
+
 
 
 
