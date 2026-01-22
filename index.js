@@ -1265,35 +1265,71 @@ raffle.hostId = String(hostId);
     }
 
     // -------------------- REST (claim remaining slots) --------------------
-    if (/^rest$/i.test(content)) {
-      const raffle = getRaffle(message.guild.id, message.channel.id);
-      if (!raffle.active || !raffle.max) return message.reply("No active raffle here.").catch(() => {});
+    // -------------------- REST (claim remaining slots) --------------------
+if (/^rest$/i.test(content)) {
+  const raffle = getRaffle(message.guild.id, message.channel.id);
+  if (!raffle.active || !raffle.max) return message.reply("No active raffle here.").catch(() => {});
 
-      const mainKey = raffleKey(message.guild.id, message.channel.id);
-      if (isRaffleLockedForUser(mainKey, message.author.id, isMod)) {
-        return message.reply("⛔ A mini winner is currently claiming reserved mains. Please wait a few minutes.").catch(() => {});
-      }
+  const mainKey = raffleKey(message.guild.id, message.channel.id);
+  const res = getReservation(mainKey, message.author.id);
 
-      let filled = 0;
-      for (let i = 1; i <= raffle.max; i++) {
-        const key = String(i);
-        const owners = raffle.claims[key];
-        if (!owners || owners.length === 0) {
-          raffle.claims[key] = [message.author.id];
-          filled++;
-        }
-      }
+  if (isRaffleLockedForUser(mainKey, message.author.id, isMod)) {
+    return message.reply("⛔ A mini winner is currently claiming reserved mains. Please wait a few minutes.").catch(() => {});
+  }
 
-      if (filled === 0) return message.reply("Nothing left to claim.").catch(() => {});
-      saveData(data);
+  // FREE raffle rule: only 1 slot unless you're in a mini reservation window
+  const freeMode = isFreeRaffle(raffle);
+  const alreadyCount = countUserClaims(raffle, message.author.id);
+  if (freeMode && alreadyCount >= 1 && !res) {
+    return message.reply("This is a **FREE** raffle: you can only claim **1** slot. Use `!remove` to change it.").catch(() => {});
+  }
 
-      await postOrUpdateBoard(message.channel, raffle, mainKey, "🎟️ Board");
-      await maybeAnnounceAvailable(message.channel, raffle).catch(() => {});
-      await message.react("✅").catch(() => {});
+  // If mini winner has a reservation window, REST should only claim up to that amount
+  let limit = null;
+  if (res && Number.isFinite(res.remaining)) limit = res.remaining;
 
-      if (isRaffleFull(raffle)) await handleFullRaffle(message.channel, raffle);
-      return;
+  const claimed = [];
+  for (let i = 1; i <= raffle.max; i++) {
+    if (limit !== null && claimed.length >= limit) break;
+
+    const key = String(i);
+    const owners = raffle.claims[key];
+    if (!owners || owners.length === 0) {
+      raffle.claims[key] = [message.author.id];
+      claimed.push(i);
     }
+  }
+
+  if (claimed.length === 0) {
+    await message.react("❌").catch(() => {});
+    return;
+  }
+
+  // ✅ Mark mini entitlement slots as Ⓜ️ (same as typed-number path)
+  if (isMiniWinner(mainKey, message.author.id)) {
+    const remainingEnt = getMiniEntitlement(mainKey, message.author.id);
+    if (remainingEnt > 0) {
+      const toMark = claimed.slice(0, remainingEnt);
+      if (toMark.length) {
+        addMiniWinnerSlots(mainKey, message.author.id, toMark);
+        useMiniEntitlement(mainKey, message.author.id, toMark.length);
+      }
+    }
+  }
+
+  saveData(data);
+  if (res) useReservation(mainKey, message.author.id, claimed.length);
+
+  await postOrUpdateBoard(message.channel, raffle, mainKey, "🎟️ Board");
+  await maybeAnnounceAvailable(message.channel, raffle).catch(() => {});
+  await announceMainsLeftIfChanged(message.channel, raffle, mainKey).catch(() => {});
+
+  await message.react("✅").catch(() => {});
+
+  if (isRaffleFull(raffle)) await handleFullRaffle(message.channel, raffle);
+  return;
+}
+
 
     // -------------------- CLAIM NUMBERS (type numbers) --------------------
     const nums = content.match(/\d+/g)?.map((n) => Number(n)) ?? [];
@@ -1352,11 +1388,23 @@ raffle.hostId = String(hostId);
 
         if (owners.includes(message.author.id)) continue;
 
-        if (owners.length === 1 && !freeMode) {
-          raffle.claims[key] = [owners[0], message.author.id];
-          claimed.push(n);
-          continue;
-        }
+   for (const n of toTry) {
+  const key = String(n);
+  const owners = raffle.claims[key];
+
+  // slot is free
+  if (!owners || owners.length === 0) {
+    raffle.claims[key] = [message.author.id];
+    claimed.push(n);
+    continue;
+  }
+
+  // user already owns it
+  if (owners.includes(message.author.id)) continue;
+
+  // 🚫 DO NOT auto-split
+  taken.push(n);
+}
 
         taken.push(n);
       }
@@ -1593,6 +1641,7 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
+
 
 
 
