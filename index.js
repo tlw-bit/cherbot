@@ -661,7 +661,7 @@ function isRaffleLockedForUser(mainKey, userId, isMod) {
   const res = getReservation(mainKey, userId);
   if (res && res.remaining > 0 && Date.now() < res.expiresAt) return false;
   
-  // Block other users if there are active reservations
+  // Block all other users when there are active reservations (e.g., mini winner claiming)
   return true;
 }
 
@@ -1164,13 +1164,20 @@ let autoClaimed = [];
       if (claimMsg) {
         console.log("✅ Mini winner message sent successfully:", { messageId: claimMsg.id, winnerId });
         // Remind the mini winner halfway through their claim window
-        const reminderDelay = Math.max(60 * 1000, (minutes * 60 * 1000) / 2); // At least 1 minute, or half the claim window
+        const ONE_MINUTE_MS = 60 * 1000;
+        const claimWindowMs = minutes * ONE_MINUTE_MS;
+        const reminderDelay = Math.max(ONE_MINUTE_MS, claimWindowMs / 2); // At least 1 minute, or half the claim window
         setTimeout(async () => {
-          const timeLeft = Math.ceil(minutes / 2);
-          await mainThread.send({
-            content: `<@${winnerId}> ⏰ You have ~${timeLeft} minute(s) left to pick your main slots! Type the numbers you want.`,
-            allowedMentions: { users: [winnerId] },
-          }).catch(() => {});
+          // Calculate actual time remaining from now
+          const res = getReservation(mainKey, winnerId);
+          if (res && res.expiresAt) {
+            const timeLeftMs = res.expiresAt - Date.now();
+            const timeLeftMin = Math.max(1, Math.ceil(timeLeftMs / ONE_MINUTE_MS));
+            await mainThread.send({
+              content: `<@${winnerId}> ⏰ You have ~${timeLeftMin} minute(s) left to pick your main slots! Type the numbers you want.`,
+              allowedMentions: { users: [winnerId] },
+            }).catch(() => {});
+          }
         }, reminderDelay);
       } else {
         console.error("⚠️ Mini winner message failed to send", { winnerId, mainThreadId, tickets, minutes });
