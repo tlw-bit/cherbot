@@ -594,11 +594,25 @@ function computeMainsLeft(mainRaffle, mainKey) {
 
 async function announceMainsLeftIfChanged(channel, mainRaffle, mainKey) {
   const left = computeMainsLeft(mainRaffle, mainKey);
+  const now = Date.now();
+
+  // hard guard against duplicate calls in same moment
+  if (
+    mainRaffle.lastMainsLeftAnnounced === left &&
+    now - (mainRaffle.lastMainsLeftAnnouncedAt || 0) < 3000
+  ) {
+    return;
+  }
+
   if (mainRaffle.lastMainsLeftAnnounced === left) return;
+
   mainRaffle.lastMainsLeftAnnounced = left;
+  mainRaffle.lastMainsLeftAnnouncedAt = now;
   saveData(data);
+
   await channel.send(`📌 **${left} MAINS LEFT**`).catch(() => {});
 }
+
 
 // -------------------- Mini Winner Ping Helper --------------------
 async function pingMiniWinnerInMain(mainThread, winnerId, winningNumber, tickets, minutes) {
@@ -1641,3 +1655,4 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
+
