@@ -1526,23 +1526,31 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.editReply({ content: "❌ Unknown button." }).catch(() => {});
     }
 
-    // ---------- Slash Commands ----------
-    if (!interaction.isChatInputCommand()) return;
+ // ---------- Slash Commands ----------
+if (!interaction.isChatInputCommand()) return;
 
-    const name = interaction.commandName;
-    if (name !== "roll") return;
+const name = interaction.commandName;
 
-    // ✅ public reply (everyone can see)
-    await interaction.deferReply({ ephemeral: false }).catch(() => {});
+// ✅ Handle /giveaway so it doesn't timeout
+if (name === "giveaway") {
+  await interaction.deferReply({ ephemeral: true }).catch(() => {});
+  return interaction.editReply("✅ Giveaway command received (giveaway handler not added yet).");
+}
 
-    // mod check
-    const isMod = isModMember(interaction.member);
-    if (!isMod) return interaction.editReply("❌ Mods only.");
+// ✅ Everything below is ONLY for /roll
+if (name !== "roll") return;
 
-    // ---- Detect if this channel is a MINI thread ----
-    const miniMeta = data.miniThreads?.[interaction.channelId];
+// ✅ public reply (everyone can see)
+await interaction.deferReply({ ephemeral: false }).catch(() => {});
 
-    // ============================================
+// mod check
+const isMod = isModMember(interaction.member);
+if (!isMod) return interaction.editReply("❌ Mods only.");
+
+// ---- Detect if this channel is a MINI thread ----
+const miniMeta = data.miniThreads?.[interaction.channelId];
+
+// ============================================
     // ✅ MINI ROLL
     // ============================================
     if (miniMeta) {
@@ -1655,4 +1663,5 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
+
 
