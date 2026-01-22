@@ -1531,11 +1531,96 @@ client.on("interactionCreate", async (interaction) => {
 
     const name = interaction.commandName; // ✅ declared ONCE
 
-    // ✅ Prevent /giveaway from timing out (replace this with your real giveaway handler)
-    if (name === "giveaway") {
-      await interaction.deferReply({ ephemeral: true }).catch(() => {});
-      return interaction.editReply("✅ /giveaway received. (Add your giveaway-create logic here)");
-    }
+ // ✅ /giveaway (creates a giveaway post with enter button)
+if (name === "giveaway") {
+  await interaction.deferReply({ ephemeral: true }).catch(() => {});
+
+  const isMod = isModMember(interaction.member);
+  if (!isMod) return interaction.editReply("❌ Mods only.");
+
+  ensureGiveawayData();
+
+  // ---- Read slash command options ----
+  // You MUST have these options created in your slash command registration:
+  // prize (string), duration (string like 10m/2h/1d), winners (integer optional)
+  const prize = interaction.options.getString("prize", true);
+  const durationRaw = interaction.options.getString("duration", true);
+  const winnersCount = interaction.options.getInteger("winners") ?? 1;
+
+  const durationMs = parseDurationToMs(durationRaw);
+  if (!durationMs) {
+    return interaction.editReply("❌ Duration must be like `10m`, `2h`, or `1d`.");
+  }
+
+  if (!Number.isFinite(winnersCount) || winnersCount < 1 || winnersCount > 50) {
+    return interaction.editReply("❌ Winners must be between 1 and 50.");
+  }
+
+  const endsAt = Date.now() + durationMs;
+  const endsUnix = Math.floor(endsAt / 1000);
+
+  const embed = new EmbedBuilder()
+    .setTitle("🎉 Giveaway")
+    .setDescription(
+      `**Prize:** ${prize}\n` +
+      `**Winners:** ${winnersCount}\n` +
+      `**Ends:** <t:${endsUnix}:R>\n\n` +
+      `Click **Enter** to join!`
+    )
+    .setTimestamp();
+
+  // We don’t know messageId until after sending, so send first, then edit button ID.
+  const rowTemp = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("giveaway:enter:temp")
+      .setLabel("Enter Giveaway")
+      .setStyle(ButtonStyle.Success)
+  );
+
+  const ch = interaction.channel;
+  if (!ch || !ch.isTextBased?.()) {
+    return interaction.editReply("❌ This command must be used in a text channel/thread.");
+  }
+
+  const mention = giveawayMention(); // optional role mention from config
+  const msg = await ch.send({
+    content: mention ? `${mention}` : "",
+    embeds: [embed],
+    components: [rowTemp],
+    allowedMentions: mention ? { parse: ["roles"] } : { parse: [] },
+  }).catch(() => null);
+
+  if (!msg) return interaction.editReply("❌ I couldn’t post the giveaway (check permissions).");
+
+  // Now update the button to include the real messageId
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`giveaway:enter:${msg.id}`)
+      .setLabel("Enter Giveaway")
+      .setStyle(ButtonStyle.Success)
+  );
+
+  await msg.edit({ components: [row] }).catch(() => {});
+
+  // Save giveaway to data.json
+  data.giveaways[msg.id] = {
+    guildId: interaction.guildId,
+    channelId: ch.id,
+    prize,
+    winners: winnersCount,
+    participants: [],
+    ended: false,
+    createdAt: Date.now(),
+    endsAt,
+  };
+  saveData(data);
+
+  // Schedule it to end
+  scheduleGiveawayEnd(client, msg.id, endsAt);
+
+  return interaction.editReply(`✅ Giveaway created! Ends <t:${endsUnix}:R>`);
+}
+
 
     // ✅ Everything below is ONLY for /roll
     if (name !== "roll") return;
@@ -1665,6 +1750,7 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
+
 
 
 
