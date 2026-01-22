@@ -1531,12 +1531,6 @@ if (!interaction.isChatInputCommand()) return;
 
 const name = interaction.commandName;
 
-// ✅ Handle /giveaway so it doesn't timeout
-if (name === "giveaway") {
-  await interaction.deferReply({ ephemeral: true }).catch(() => {});
-  return interaction.editReply("✅ Giveaway command received (giveaway handler not added yet).");
-}
-
 // ✅ Everything below is ONLY for /roll
 if (name !== "roll") return;
 
@@ -1663,5 +1657,6 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
+
 
 
