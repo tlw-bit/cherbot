@@ -1145,8 +1145,8 @@ let autoClaimed = [];
         await mainThread.send({
           content:
             `<@${winnerId}>\n` +
-            `🏆 **Mini Winner!** (slot #${winningNumber})\n\n` +
-            `⚡ **Auto-filled final mains:** ${autoClaimed.join(", ")}\n` +
+            `🏆 **You won the mini!** (slot #${winningNumber})\n\n` +
+            `⚡ **Auto-filled your final main slots:** ${autoClaimed.join(", ")}\n` +
             `✅ Main raffle is now **FULL**`,
           allowedMentions: { users: [winnerId] },
         }).catch((e) => console.error("❌ Failed to send mini winner auto-fill message:", e?.message || e));
@@ -1161,13 +1161,15 @@ let autoClaimed = [];
       const claimMsg = await pingMiniWinnerInMain(mainThread, winnerId, winningNumber, tickets, minutes);
       if (claimMsg) {
         console.log("✅ Mini winner message sent successfully:", { messageId: claimMsg.id, winnerId });
-        // Always ping the mini winner again after 5 minutes to remind them
+        // Remind the mini winner halfway through their claim window
+        const reminderDelay = Math.max(60 * 1000, (minutes * 60 * 1000) / 2); // At least 1 minute, or half the claim window
         setTimeout(async () => {
+          const timeLeft = Math.ceil(minutes / 2);
           await mainThread.send({
-            content: `<@${winnerId}> ⏰ You have 5 minutes left to claim your reserved main slots!`,
+            content: `<@${winnerId}> ⏰ You have ~${timeLeft} minute(s) left to pick your main slots! Type the numbers you want.`,
             allowedMentions: { users: [winnerId] },
           }).catch(() => {});
-        }, 5 * 60 * 1000); // 5 minutes
+        }, reminderDelay);
       } else {
         console.error("⚠️ Mini winner message failed to send", { winnerId, mainThreadId, tickets, minutes });
       }
