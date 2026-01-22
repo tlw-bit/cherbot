@@ -849,7 +849,7 @@ client.on("messageCreate", async (message) => {
     // --- !code ---
     if (content.toLowerCase() === "!code") {
       return message.reply(`🧾 Cherbot code: **${makeToyCode()}**`).catch(() => {});
-    }
+    });
 
 // -------------------- MAIN RAFFLE START --------------------
 const startMatch = content.match(/^!(\d+)\s+slots(?:\s+(.+))?$/i);
@@ -1422,6 +1422,7 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
+
 
 
 
