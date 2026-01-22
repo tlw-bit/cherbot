@@ -630,6 +630,7 @@ function setReservation(mainKey, userId, remaining, minutes) {
     remaining,
     expiresAt: Date.now() + minutes * 60 * 1000,
   };
+  console.log("✅ Reservation set:", { mainKey, userId, remaining, minutes });
   saveData(data);
 }
 
@@ -686,8 +687,9 @@ async function pingMiniWinnerInMain(mainThread, winnerId, winningNumber, tickets
   return mainThread.send({
     content:
       `<@${winnerId}>\n` +
-      `🏆 **Mini Winner!** (slot #${winningNumber})\n` +
-      `🎟️ Claim **${tickets}** main slot(s)\n` +
+      `🏆 **You won the mini!** (slot #${winningNumber})\n` +
+      `🎟️ **Pick ${tickets} slot(s) on the main raffle**\n` +
+      `💬 Type the numbers you want (e.g., "5 12 27")\n` +
       `⏳ **${minutes} minutes** — others are paused`,
     allowedMentions: { users: [winnerId] },
   }).catch((e) => {
@@ -1305,6 +1307,16 @@ if (isRaffleLockedForUser(mainKey, message.author.id, isMod)) {
         const claimedCount = countClaimedSlots(raffle);
         const availableCount = Math.max(0, raffle.max - claimedCount - totalReserved);
         
+        console.log("🔍 Claim attempt:", {
+          userId: message.author.id,
+          mainKey,
+          hasReservation: !!res,
+          reservationRemaining: res?.remaining,
+          totalReserved,
+          availableCount,
+          isMod
+        });
+        
         if (availableCount <= 0 && !res) {
           return message
             .reply("⛔ All slots are currently reserved. A mini winner is claiming reserved mains. Please wait.")
@@ -1313,6 +1325,7 @@ if (isRaffleLockedForUser(mainKey, message.author.id, isMod)) {
 
 // ⛔ Pause other claims while a mini winner has an active claim window
 if (isRaffleLockedForUser(mainKey, message.author.id, isMod)) {
+  console.warn("⚠️ User locked out:", { userId: message.author.id, mainKey });
   return message
     .reply("⛔ A mini winner is currently claiming reserved mains. Please wait a few minutes.")
     .catch(() => {});
