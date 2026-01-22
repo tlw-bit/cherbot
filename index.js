@@ -1320,36 +1320,6 @@ raffle.hostId = String(message.author.id);
   }
 });
 
-// -------------------- Interactions (buttons + slash commands) --------------------
-client.on("interactionCreate", async (interaction) => {
-  try {
-    // ---------- Buttons ----------
-    if (interaction.isButton()) {
-      const id = interaction.customId;
-     await interaction.deferReply().catch(() => {}); // public
-
-
-      if (id.startsWith("giveaway:enter:")) {
-        ensureGiveawayData();
-
-        const messageId = id.split(":")[2];
-        const g = data.giveaways?.[messageId];
-
-        if (!g) return interaction.editReply({ content: "❌ This giveaway no longer exists." });
-        if (g.ended) return interaction.editReply({ content: "❌ This giveaway has ended." });
-
-        if (!Array.isArray(g.participants)) g.participants = [];
-        if (g.participants.includes(interaction.user.id)) {
-          return interaction.editReply({ content: "✅ You’re already entered!" });
-        }
-
-        g.participants.push(interaction.user.id);
-        data.giveaways[messageId] = g;
-        saveData(data);
-return interaction.editReply({ content: "❌ Unknown button." }).catch(() => {});
-}
-
-} // 👈 CLOSES: if (interaction.isButton())
 
 // -------------------- Interactions (buttons + slash commands) --------------------
 client.on("interactionCreate", async (interaction) => {
@@ -1386,76 +1356,131 @@ client.on("interactionCreate", async (interaction) => {
     // ---------- Slash Commands ----------
     if (!interaction.isChatInputCommand()) return;
 
-    const name = interaction.commandName;
+  const name = interaction.commandName;
 
-    if (name === "roll") {
-      // public reply (everyone can see it)
-      await interaction.deferReply().catch(() => {});
+if (name === "roll") {
+  // ✅ respond fast so Discord doesn't show "application did not respond"
+  await interaction.deferReply({ ephemeral: false }).catch(() => {});
 
-      // mod check
-      const member = interaction.member;
-      const isMod = isModMember(member);
-      if (!isMod) return interaction.editReply("❌ Mods only.");
+  // mod check
+  const isMod = isModMember(interaction.member);
+  if (!isMod) return interaction.editReply("❌ Mods only.");
 
-      // must be used in a thread/channel that has a raffle record
-      const raffle = getRaffle(interaction.guildId, interaction.channelId);
-      if (!raffle?.max) return interaction.editReply("❌ No raffle found in this channel/thread.");
-      if (!isRaffleFull(raffle)) return interaction.editReply("❌ Raffle isn’t full yet.");
+  // ---- Detect if this channel is a MINI thread ----
+  const miniMeta = data.miniThreads?.[interaction.channelId];
 
-      // build entry pool (1 entry per claimed slot, split slots give multiple entries)
-      const pool = [];
-      for (const [slot, owners] of Object.entries(raffle.claims || {})) {
-        if (!Array.isArray(owners) || owners.length === 0) continue;
-        for (const raw of owners) {
-          const uid = normalizeUserId(raw);
-          if (uid) pool.push({ slot, uid });
-        }
+  // ============================================
+  // ✅ MINI ROLL: pick mini winner + ping in MAIN
+  // ============================================
+  if (miniMeta) {
+    const miniRaffle = getRaffle(interaction.guildId, interaction.channelId);
+
+    if (!miniRaffle?.max) return interaction.editReply("❌ No mini raffle found here.");
+    if (!isRaffleFull(miniRaffle)) return interaction.editReply("❌ Mini raffle isn’t full yet.");
+
+    // build pool from mini raffle claims
+    const pool = [];
+    for (const [slot, owners] of Object.entries(miniRaffle.claims || {})) {
+      if (!Array.isArray(owners) || owners.length === 0) continue;
+      for (const raw of owners) {
+        const uid = normalizeUserId(raw);
+        if (uid) pool.push({ slot, uid });
       }
+    }
+    if (!pool.length) return interaction.editReply("❌ No valid entries to roll from.");
 
-      if (!pool.length) return interaction.editReply("❌ No valid entries to roll from.");
+    const picked = pool[randInt(0, pool.length - 1)];
+    const winningSlot = String(picked.slot);
+    const winnerId = String(picked.uid);
 
-      const picked = pool[randInt(0, pool.length - 1)];
-      const winningSlot = picked.slot;
-      const winnerId = picked.uid;
+    const mainKey = miniMeta.mainKey;
+    const tickets = Number(miniMeta.tickets || 1);
+    const minutes = Number(config.miniClaimWindowMinutes ?? 10);
 
-      // ✅ ALWAYS announce in the channel/thread where the command was run
-      await interaction.channel.send({
-        content: `🎲 **ROLL RESULT**\n🏆 Winner: <@${winnerId}>\n🎟️ Winning slot: **#${winningSlot}**`,
-        allowedMentions: { users: [winnerId] },
-      }).catch(() => {});
+    // mark winner so Ⓜ️ shows on main board
+    markMiniWinner(mainKey, winnerId);
 
-      // ✅ OPTIONAL: also mirror to winners channel
-      const winnersCh = await getRaffleWinnersChannel(interaction.guild).catch(() => null);
-      if (winnersCh && winnersCh.id !== interaction.channelId) {
-        await winnersCh.send({
-          content: `🎲 **ROLL RESULT** (from <#${interaction.channelId}>)\n🏆 Winner: <@${winnerId}>\n🎟️ Winning slot: **#${winningSlot}**`,
-          allowedMentions: { users: [winnerId] },
-        }).catch(() => {});
-      }
-
-      // public interaction reply
-      return interaction.editReply(`✅ Rolled! Winner: <@${winnerId}> (slot #${winningSlot}).`);
+    // remove placeholder reservation for this mini
+    const placeholderKey = `mini:${interaction.channelId}`;
+    if (data.reservations?.[mainKey]?.[placeholderKey]) {
+      delete data.reservations[mainKey][placeholderKey];
+      saveData(data);
     }
 
-    // put any other slash commands here later...
-    // if (name === "assign") { ... }
-    // if (name === "free") { ... }
+    // set winner reservation (locks main for everyone else)
+    setReservation(mainKey, winnerId, tickets, minutes);
 
-  } catch (err) {
-    console.error("interactionCreate error:", err?.stack || err);
-    try {
-      if (interaction?.isRepliable?.()) {
-        if (interaction.deferred || interaction.replied) {
-          await interaction.editReply({ content: "❌ Something went wrong." }).catch(() => {});
-        } else {
-          await interaction.reply({ content: "❌ Something went wrong.", ephemeral: true }).catch(() => {});
-        }
-      }
-    } catch {}
+    // fetch main thread and ping winner there
+    const mainThreadId = String(mainKey.split(":")[1]);
+    const mainThread = await interaction.guild.channels.fetch(mainThreadId).catch(() => null);
+    if (!mainThread || !mainThread.isTextBased?.()) {
+      return interaction.editReply("❌ Main raffle thread not found.");
+    }
+
+    // add winner to main thread if private
+    try { await mainThread.members.add(winnerId); } catch {}
+
+    const mainRaffle = getRaffle(interaction.guildId, mainThreadId);
+
+    await postOrUpdateBoard(mainThread, mainRaffle, mainKey, "🎟️ Main Board").catch(() => {});
+    await pingMiniWinnerInMain(mainThread, winnerId, winningSlot, tickets, minutes).catch(() => {});
+
+    // ✅ announce the mini roll result IN THE MINI THREAD (where /roll was run)
+    await interaction.channel.send({
+      content: `🎲 **MINI ROLL RESULT**\n🏆 Winner: <@${winnerId}>\n🎟️ Winning mini slot: **#${winningSlot}**\n\n➡️ Winner has **${minutes} minutes** to claim **${tickets}** main slot(s) in <#${mainThreadId}>`,
+      allowedMentions: { users: [winnerId] },
+    }).catch(() => {});
+
+    // optional mirror to winners channel
+    const winnersCh = await getRaffleWinnersChannel(interaction.guild).catch(() => null);
+    if (winnersCh && winnersCh.id !== interaction.channelId) {
+      await winnersCh.send({
+        content: `🎲 **MINI ROLL RESULT** (from <#${interaction.channelId}>)\n🏆 Winner: <@${winnerId}>\n🎟️ Winning mini slot: **#${winningSlot}**\n➡️ Claim in <#${mainThreadId}>`,
+        allowedMentions: { users: [winnerId] },
+      }).catch(() => {});
+    }
+
+    return interaction.editReply(`✅ Mini rolled! Winner: <@${winnerId}> (slot #${winningSlot}).`);
   }
-});
 
+  // ============================================
+  // ✅ MAIN ROLL: normal raffle roll in this thread
+  // ============================================
+  const raffle = getRaffle(interaction.guildId, interaction.channelId);
+  if (!raffle?.max) return interaction.editReply("❌ No raffle found in this channel/thread.");
+  if (!isRaffleFull(raffle)) return interaction.editReply("❌ Raffle isn’t full yet.");
 
+  const pool = [];
+  for (const [slot, owners] of Object.entries(raffle.claims || {})) {
+    if (!Array.isArray(owners) || owners.length === 0) continue;
+    for (const raw of owners) {
+      const uid = normalizeUserId(raw);
+      if (uid) pool.push({ slot, uid });
+    }
+  }
+  if (!pool.length) return interaction.editReply("❌ No valid entries to roll from.");
+
+  const picked = pool[randInt(0, pool.length - 1)];
+  const winningSlot = String(picked.slot);
+  const winnerId = String(picked.uid);
+
+  // ✅ ALWAYS announce in the channel/thread where /roll was run
+  await interaction.channel.send({
+    content: `🎲 **ROLL RESULT**\n🏆 Winner: <@${winnerId}>\n🎟️ Winning slot: **#${winningSlot}**`,
+    allowedMentions: { users: [winnerId] },
+  }).catch(() => {});
+
+  // optional mirror to winners channel
+  const winnersCh = await getRaffleWinnersChannel(interaction.guild).catch(() => null);
+  if (winnersCh && winnersCh.id !== interaction.channelId) {
+    await winnersCh.send({
+      content: `🎲 **ROLL RESULT** (from <#${interaction.channelId}>)\n🏆 Winner: <@${winnerId}>\n🎟️ Winning slot: **#${winningSlot}**`,
+      allowedMentions: { users: [winnerId] },
+    }).catch(() => {});
+  }
+
+  return interaction.editReply(`✅ Rolled! Winner: <@${winnerId}> (slot #${winningSlot}).`);
+}
 
   // mod check
   const member = interaction.member;
@@ -1518,6 +1543,7 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
+
 
 
 
