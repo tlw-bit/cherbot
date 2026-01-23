@@ -807,34 +807,35 @@ async function handleFullRaffle(channel, raffle) {
 
   raffle.fullNotified = true;
   raffle.active = false; // close it once full
-  raffle.endedAt = Date.now(); // ✅ mark completion time
+  raffle.endedAt = Date.now(); // mark completion time
   saveData(data);
 
-  // ✅ 5) THIS IS WHERE IT GOES: safety log once when raffle becomes full
   await safetyLog(channel.guild, {
     title: "✅ Raffle FULL",
     fields: [
       { name: "Type", value: isMini ? "Mini" : "Main", inline: true },
       { name: "Channel", value: `<#${channel.id}>`, inline: true },
       { name: "Host", value: raffle.hostId ? `<@${raffle.hostId}>` : "Unknown", inline: true },
-      { name: "Slots", value: `${countClaimedSlots(raffle)}/${raffle.max}`, inline: true },
+      { name: "Slots", value: `${countClaimedSlots(raffle)}/${raffle.max}`, inline: true }
     ],
-    color: 0x2ecc71,
+    color: 0x2ecc71
   });
 
   await channel.send({
     content: `${hostPing}✅ **FULL** — all slots claimed. Mods can now \`/roll\` the winner 🎲`,
-    allowedMentions: shouldPingHost ? { parse: ["users"] } : { parse: [] },
+    allowedMentions: shouldPingHost ? { parse: ["users"] } : { parse: [] }
   }).catch(() => {});
 
   const mainKey = isMini ? null : raffleKey(raffle.guildId, raffle.channelId);
 
   await postTotalsIfFull(channel, raffle, isMini ? "Mini" : "Main", mainKey).catch(() => {});
 
+  // Paid-only list output (won’t fire for FREE raffles)
   if (!isFreeRaffle(raffle)) {
     await postAmountsToList(channel, raffle, isMini ? "Mini" : "Main", mainKey).catch(() => {});
   }
-} // ✅ closes handleFullRaffle
+}
+
 
 
 // -------------------- Helper functions for raffles --------------------
@@ -1170,7 +1171,7 @@ if (miniMatch && inMainRaffleChannel) {
 
   const pot = tickets * mainTicketPrice;
   const perSlotExact = pot / miniSlots;
-  const perSlot = Math.round(perSlotExact);
+  const perSlot = Math.ceil(perSlotExact);
 
   const miniCreateChannel = miniCreateId
     ? await message.guild.channels.fetch(miniCreateId).catch(() => null)
@@ -1914,6 +1915,7 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
+
 
 
 
