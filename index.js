@@ -184,6 +184,20 @@ function ensureUser(userId) {
 function isModMember(member) {
   return Boolean(member?.permissions?.has(PermissionsBitField.Flags.ManageGuild));
 }
+// -------------------- Raffle Host (Option B: Thread Owner) --------------------
+function isThreadHost(channel, userId) {
+  const owner = normalizeUserId(channel?.ownerId) || String(channel?.ownerId || "");
+  const u = normalizeUserId(userId) || String(userId || "");
+  return Boolean(owner && u && owner === u);
+}
+
+// Mod OR thread owner
+function canRunRaffles(memberOrUser, channel) {
+  const isMod = isModMember(memberOrUser);
+  const uid = memberOrUser?.user?.id || memberOrUser?.id;
+  const isHost = isThreadHost(channel, uid);
+  return isMod || isHost;
+}
 
 function gambaMention() {
   const rid = String(config.gambaRoleId || "").trim();
@@ -565,8 +579,8 @@ function useReservation(mainKey, userId, used) {
 }
 
 // ✅ Locks main claims ONLY while a REAL mini-winner reservation is active (not placeholders)
-function isRaffleLockedForUser(mainKey, userId, isMod) {
-  if (isMod) return false;
+function isRaffleLockedForUser(mainKey, userId, bypassLock) {
+  if (bypassLock) return false;
 
   const my = getReservation(mainKey, userId);
   if (my) return false; // winner can claim
@@ -581,6 +595,7 @@ function isRaffleLockedForUser(mainKey, userId, isMod) {
   }
   return false;
 }
+
 
 // -------------------- Mains left helpers --------------------
 function computeMainsLeft(mainRaffle, mainKey) {
@@ -925,6 +940,7 @@ client.on("messageCreate", async (message) => {
   try {
     if (!message.guild) return;
     if (message.author.bot) return;
+const bypassLock = canRunRaffles(message.member, message.channel);
 
     ensureRaffleData();
     ensureGiveawayData();
@@ -954,7 +970,11 @@ if (content.toLowerCase() === "!code") {
 // -------------------- MAIN RAFFLE START --------------------
 const startMatch = content.match(/^!(\d+)\s+slots(?:\s+(.+))?$/i);
 if (startMatch && inMainRaffleChannel) {
-  if (!isMod) return message.reply("❌ Mods only.").catch(() => {});
+const canRaffle = canRunRaffles(message.member, message.channel);
+if (!canRaffle) {
+  return message.reply("❌ Mods or raffle host (thread owner) only.").catch(() => {});
+}
+
   if (!isThreadInRaffleCreate) {
     return message
       .reply("❌ Start the raffle **inside the thread** (not the parent channel).")
@@ -1034,7 +1054,11 @@ raffle.hostId = String(hostId);
     // -------------------- MINI CREATE --------------------
     const miniMatch = content.match(/^!mini\s+(\d+)\s*x(?:\s+(\d+))?\s*-\s*(\d+)\s*(?:c|coins?)$/i);
     if (miniMatch && inMainRaffleChannel) {
-      if (!isMod) return message.reply("❌ Mods only.").catch(() => {});
+      const canRaffle = canRunRaffles(message.member, message.channel);
+if (!canRaffle) {
+  return message.reply("❌ Mods or raffle host (thread owner) only.").catch(() => {});
+}
+
       if (!isThreadInRaffleCreate) {
         return message.reply("❌ Run `!mini ...` **inside the main raffle thread**.").catch(() => {});
       }
@@ -1119,7 +1143,11 @@ raffle.hostId = String(hostId);
 
     // -------------------- MINI DRAW (inside mini thread) --------------------
     if (/^!minidraw$/i.test(content)) {
-      if (!isMod) return message.reply("❌ Mods only.").catch(() => {});
+  const canRaffle = canRunRaffles(message.member, message.channel);
+if (!canRaffle) {
+  return message.reply("❌ Mods or raffle host (thread owner) only.").catch(() => {});
+}
+
 
       const meta = data.miniThreads?.[message.channel.id];
       if (!meta) return message.reply("This isn’t a registered mini thread.").catch(() => {});
@@ -1287,7 +1315,13 @@ if (/^rest$/i.test(content)) {
   const mainKey = raffleKey(message.guild.id, message.channel.id);
   const res = getReservation(mainKey, message.author.id);
 
-  if (isRaffleLockedForUser(mainKey, message.author.id, isMod)) {
+if (isRaffleLockedForUser(mainKey, message.author.id, bypassLock)) {
+  return message
+    .reply("⛔ A mini winner is currently claiming reserved mains. Please wait a few minutes.")
+    .catch(() => {});
+}
+
+ {
     return message.reply("⛔ A mini winner is currently claiming reserved mains. Please wait a few minutes.").catch(() => {});
   }
 
@@ -1361,7 +1395,16 @@ if (/^rest$/i.test(content)) {
       const freeMode = isFreeRaffle(raffle);
 
       // lock check
-      if (isRaffleLockedForUser(mainKey, message.author.id, isMod)) {
+     if (isRaffleLockedForUser(mainKey, message.author.id, bypassLock)) {
+  if (isMiniWinner(mainKey, message.author.id) && !res) {
+    return message.reply("⛔ Your mini winner claim window has expired.").catch(() => {});
+  }
+  return message
+    .reply("⛔ A mini winner is currently claiming reserved mains. Please wait a few minutes.")
+    .catch(() => {});
+}
+
+ {
         if (isMiniWinner(mainKey, message.author.id) && !res) {
           return message.reply("⛔ Your mini winner claim window has expired.").catch(() => {});
         }
@@ -1494,7 +1537,7 @@ if (res) useReservation(mainKey, message.author.id, claimed.length);
   }
 });
 
-// -------------------- Interactions (buttons + slash commands) --------------------
+// -------------------- InteractionCreate (buttons + slash commands) --------------------
 client.on("interactionCreate", async (interaction) => {
   try {
     // ---------- Buttons ----------
@@ -1526,100 +1569,101 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.editReply({ content: "❌ Unknown button." }).catch(() => {});
     }
 
-    // ---------- Slash Commands ----------
+ 
+
+      // ---------- Slash Commands ----------
     if (!interaction.isChatInputCommand()) return;
 
-    const name = interaction.commandName; // ✅ declared ONCE
+    const name = interaction.commandName;
 
- // ✅ /giveaway (creates a giveaway post with enter button)
-if (name === "giveaway") {
-  await interaction.deferReply({ ephemeral: true }).catch(() => {});
+    // ======================
+    // /giveaway
+    // ======================
+    if (name === "giveaway") {
+      await interaction.deferReply({ ephemeral: true }).catch(() => {});
 
-  const isMod = isModMember(interaction.member);
-  if (!isMod) return interaction.editReply("❌ Mods only.");
+      const isMod = isModMember(interaction.member);
+      if (!isMod) return interaction.editReply("❌ Mods only.");
 
-  ensureGiveawayData();
+      ensureGiveawayData();
 
-  // ---- Read slash command options ----
-  // You MUST have these options created in your slash command registration:
-  // prize (string), duration (string like 10m/2h/1d), winners (integer optional)
-  const prize = interaction.options.getString("prize", true);
-  const durationRaw = interaction.options.getString("duration", true);
-  const winnersCount = interaction.options.getInteger("winners") ?? 1;
+      const prize = interaction.options.getString("prize", true);
+      const durationRaw = interaction.options.getString("duration", true);
+      const winnersCount = interaction.options.getInteger("winners") ?? 1;
 
-  const durationMs = parseDurationToMs(durationRaw);
-  if (!durationMs) {
-    return interaction.editReply("❌ Duration must be like `10m`, `2h`, or `1d`.");
-  }
+      const durationMs = parseDurationToMs(durationRaw);
+      if (!durationMs) {
+        return interaction.editReply("❌ Duration must be like `10m`, `2h`, or `1d`.");
+      }
 
-  if (!Number.isFinite(winnersCount) || winnersCount < 1 || winnersCount > 50) {
-    return interaction.editReply("❌ Winners must be between 1 and 50.");
-  }
+      if (!Number.isFinite(winnersCount) || winnersCount < 1 || winnersCount > 50) {
+        return interaction.editReply("❌ Winners must be between 1 and 50.");
+      }
 
-  const endsAt = Date.now() + durationMs;
-  const endsUnix = Math.floor(endsAt / 1000);
+      const endsAt = Date.now() + durationMs;
+      const endsUnix = Math.floor(endsAt / 1000);
 
-  const embed = new EmbedBuilder()
-    .setTitle("🎉 Giveaway")
-    .setDescription(
-      `**Prize:** ${prize}\n` +
-      `**Winners:** ${winnersCount}\n` +
-      `**Ends:** <t:${endsUnix}:R>\n\n` +
-      `Click **Enter** to join!`
-    )
-    .setTimestamp();
+      const embed = new EmbedBuilder()
+        .setTitle("🎉 Giveaway")
+        .setDescription(
+          `**Prize:** ${prize}\n` +
+          `**Winners:** ${winnersCount}\n` +
+          `**Ends:** <t:${endsUnix}:R>\n\n` +
+          `Click **Enter** to join!`
+        )
+        .setTimestamp();
 
-  // We don’t know messageId until after sending, so send first, then edit button ID.
-  const rowTemp = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("giveaway:enter:temp")
-      .setLabel("Enter Giveaway")
-      .setStyle(ButtonStyle.Success)
-  );
+      const rowTemp = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId("giveaway:enter:temp")
+          .setLabel("Enter Giveaway")
+          .setStyle(ButtonStyle.Success)
+      );
 
-  const ch = interaction.channel;
-  if (!ch || !ch.isTextBased?.()) {
-    return interaction.editReply("❌ This command must be used in a text channel/thread.");
-  }
+      const ch = interaction.channel;
+      if (!ch || !ch.isTextBased?.()) {
+        return interaction.editReply("❌ This command must be used in a text channel or thread.");
+      }
 
-  const mention = giveawayMention(); // optional role mention from config
-  const msg = await ch.send({
-    content: mention ? `${mention}` : "",
-    embeds: [embed],
-    components: [rowTemp],
-    allowedMentions: mention ? { parse: ["roles"] } : { parse: [] },
-  }).catch(() => null);
+      const mention = giveawayMention();
+      const msg = await ch.send({
+        content: mention || "",
+        embeds: [embed],
+        components: [rowTemp],
+        allowedMentions: mention ? { parse: ["roles"] } : { parse: [] },
+      }).catch(() => null);
 
-  if (!msg) return interaction.editReply("❌ I couldn’t post the giveaway (check permissions).");
+      if (!msg) {
+        return interaction.editReply("❌ I couldn’t post the giveaway (check permissions).");
+      }
 
-  // Now update the button to include the real messageId
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`giveaway:enter:${msg.id}`)
-      .setLabel("Enter Giveaway")
-      .setStyle(ButtonStyle.Success)
-  );
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`giveaway:enter:${msg.id}`)
+          .setLabel("Enter Giveaway")
+          .setStyle(ButtonStyle.Success)
+      );
 
-  await msg.edit({ components: [row] }).catch(() => {});
+      await msg.edit({ components: [row] }).catch(() => {});
 
-  // Save giveaway to data.json
-  data.giveaways[msg.id] = {
-    guildId: interaction.guildId,
-    channelId: ch.id,
-    prize,
-    winners: winnersCount,
-    participants: [],
-    ended: false,
-    createdAt: Date.now(),
-    endsAt,
-  };
-  saveData(data);
+      data.giveaways[msg.id] = {
+        guildId: interaction.guildId,
+        channelId: ch.id,
+        prize,
+        winners: winnersCount,
+        participants: [],
+        ended: false,
+        createdAt: Date.now(),
+        endsAt,
+      };
+      saveData(data);
 
-  // Schedule it to end
-  scheduleGiveawayEnd(client, msg.id, endsAt);
+      scheduleGiveawayEnd(client, msg.id, endsAt);
 
-  return interaction.editReply(`✅ Giveaway created! Ends <t:${endsUnix}:R>`);
-}
+      return interaction.editReply(`✅ Giveaway created! Ends <t:${endsUnix}:R>`);
+    }
+
+    // (roll command continues below)
 
 
     // ✅ Everything below is ONLY for /roll
@@ -1628,9 +1672,11 @@ if (name === "giveaway") {
     // ✅ public reply (everyone can see)
     await interaction.deferReply({ ephemeral: false }).catch(() => {});
 
-    // mod check
-    const isMod = isModMember(interaction.member);
-    if (!isMod) return interaction.editReply("❌ Mods only.");
+const canRaffle = canRunRaffles(interaction.member, interaction.channel);
+if (!canRaffle) {
+  return interaction.editReply("❌ Mods or raffle host (thread owner) only.");
+}
+
 
     // ---- Detect if this channel is a MINI thread ----
     const miniMeta = data.miniThreads?.[interaction.channelId];
@@ -1750,6 +1796,7 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
+
 
 
 
