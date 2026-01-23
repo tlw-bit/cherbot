@@ -6,9 +6,6 @@
   "xpMin": 10,
   "xpMax": 20,
   "cooldownSeconds": 60,
-{
-  "logChannelId": "1456955298597175391"
-}
 
   "logChannelId": "1456955298597175391",
   "levelUpChannelId": "1456967580299559066",
@@ -41,7 +38,4 @@
   "giveawayRoleId": "1457667581459828839",
 
   "miniClaimWindowMinutes": 5,
-  "miniDefaultSlots": 6
-}
-
-
+  "miniDefaultSlot
