@@ -827,13 +827,14 @@ async function handleFullRaffle(channel, raffle) {
     allowedMentions: shouldPingHost ? { parse: ["users"] } : { parse: [] },
   }).catch(() => {});
 
-const mainKey = isMini ? null : raffleKey(raffle.guildId, raffle.channelId);
+  const mainKey = isMini ? null : raffleKey(raffle.guildId, raffle.channelId);
 
-await postTotalsIfFull(channel, raffle, isMini ? "Mini" : "Main", mainKey).catch(() => {});
+  await postTotalsIfFull(channel, raffle, isMini ? "Mini" : "Main", mainKey).catch(() => {});
 
-if (!isFreeRaffle(raffle)) {
-  await postAmountsToList(channel, raffle, isMini ? "Mini" : "Main", mainKey).catch(() => {});
-}
+  if (!isFreeRaffle(raffle)) {
+    await postAmountsToList(channel, raffle, isMini ? "Mini" : "Main", mainKey).catch(() => {});
+  }
+} // ✅ closes handleFullRaffle
 
 
 // -------------------- Helper functions for raffles --------------------
@@ -1913,6 +1914,7 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
+
 
 
 
