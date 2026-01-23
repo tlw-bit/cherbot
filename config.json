@@ -10,7 +10,6 @@
   "logChannelId": "1456955298597175391",
   "levelUpChannelId": "1456967580299559066",
 
-  "winnersChannelId": "1459609291710398519",
   "raffleWinnerChannelId": "1459609291710398519",
 
   "levelRoles": {
@@ -38,4 +37,5 @@
   "giveawayRoleId": "1457667581459828839",
 
   "miniClaimWindowMinutes": 5,
-  "miniDefaultSlot
+  "miniDefaultSlots": 6
+}
