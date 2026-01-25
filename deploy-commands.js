@@ -1,4 +1,4 @@
-// deploy-commands.js (CLEAN + SAFE)
+// deploy-commands.js (RAFFLES + GIVEAWAYS ONLY)
 // Registers slash commands to ONE guild (guild commands update fast)
 
 const { REST, Routes, SlashCommandBuilder, PermissionFlagsBits } = require("discord.js");
@@ -21,21 +21,6 @@ if (!clientId || !guildId) {
 }
 
 const commands = [
-  new SlashCommandBuilder()
-    .setName("level")
-    .setDescription("View your level or another user's level")
-    .addUserOption((opt) => opt.setName("user").setDescription("User to check").setRequired(false)),
-
-  new SlashCommandBuilder()
-    .setName("leaderboard")
-    .setDescription("View the XP leaderboard"),
-
-  new SlashCommandBuilder()
-    .setName("stats")
-    .setDescription("View a user's XP and level (mods only)")
-    .addUserOption((opt) => opt.setName("user").setDescription("User to inspect").setRequired(true))
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
-
   // /free (mods can free specific slot, users can free their own slots)
   new SlashCommandBuilder()
     .setName("free")
@@ -48,23 +33,7 @@ const commands = [
         .setMinValue(1)
     ),
 
-  new SlashCommandBuilder()
-    .setName("xpreset")
-    .setDescription("Reset or set a user's XP/level (mods only)")
-    .addUserOption((opt) => opt.setName("user").setDescription("User to reset").setRequired(true))
-    .addIntegerOption((opt) =>
-      opt.setName("level").setDescription("Level to set (default: 1)").setRequired(false).setMinValue(1)
-    )
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
-
-  new SlashCommandBuilder()
-    .setName("givexp")
-    .setDescription("Give or remove XP from a user (mods only)")
-    .addUserOption((opt) => opt.setName("user").setDescription("User to modify").setRequired(true))
-    .addIntegerOption((opt) => opt.setName("amount").setDescription("XP amount (can be negative)").setRequired(true))
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
-
-  // /giveaway
+  // /giveaway (mods only)
   new SlashCommandBuilder()
     .setName("giveaway")
     .setDescription("Giveaway commands (mods only)")
@@ -76,7 +45,12 @@ const commands = [
         .addStringOption((opt) => opt.setName("prize").setDescription("Prize name").setRequired(true))
         .addStringOption((opt) => opt.setName("duration").setDescription("Duration like 10m, 2h, 1d").setRequired(true))
         .addIntegerOption((opt) =>
-          opt.setName("winners").setDescription("Number of winners (1–50)").setRequired(true).setMinValue(1).setMaxValue(50)
+          opt
+            .setName("winners")
+            .setDescription("Number of winners (1–50)")
+            .setRequired(true)
+            .setMinValue(1)
+            .setMaxValue(50)
         )
         .addUserOption((opt) => opt.setName("sponsor").setDescription("Who is sponsoring this giveaway?").setRequired(false))
         .addBooleanOption((opt) => opt.setName("ping").setDescription("Ping the giveaway role? (default: true)").setRequired(false))
@@ -110,7 +84,7 @@ const commands = [
     .addUserOption((opt) => opt.setName("user").setDescription("User to receive this slot").setRequired(true))
     .addUserOption((opt) => opt.setName("user2").setDescription("Optional second user (split, paid raffles only)").setRequired(false)),
 
-  // /roll (now includes d100, d200, d500)
+  // /roll (d4..d500)
   new SlashCommandBuilder()
     .setName("roll")
     .setDescription("Roll a die (d4, d6, d8, d10, d20, d50, d100, d200, d500)")
