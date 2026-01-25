@@ -9,7 +9,7 @@
   "giveawayWinnerChannelId": "1456954533065392128",
 
   // Role to ping for giveaways (optional, leave "" to disable)
-  "giveawayRoleId": "",
+  "giveawayRoleId": "1457667581459828839",
 
 
   // =====================
@@ -26,7 +26,7 @@
   "raffleWinnerChannelId": "P1465032861991309467",
 
   // Role to ping when raffles start (optional)
-  "gambaRoleId": "",
+  "gambaRoleId": "1456957921005932585",
 
 
   // =====================
@@ -53,3 +53,4 @@
   // Max numbers to show in availability messages
   "availableMaxToShow": 40
 }
+
