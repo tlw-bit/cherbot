@@ -6,12 +6,13 @@
   "giveawayRoleId": "1457667581459828839",
   "giveawayWinnerChannelId": "1456954533065392128",
   "gambaRoleId": "1456957921005932585",
-  "levelUpChannelId": "",
+  "levelUpChannelId": "1456967580299559066",
   "miniDefaultSlots": 6,
   "miniClaimWindowMinutes": 10,
   "availableAfterClaimed": 10,
   "availableAnnounceEvery": 5,
   "availableMaxToShow": 40
 }
+
 
 
