@@ -1,41 +1,55 @@
 {
-  "token": "",
-  "guildId": "1456735416156819578",
-  "clientId": "1457704762815287350",
-
-  "xpMin": 10,
-  "xpMax": 20,
-  "cooldownSeconds": 60,
+  // =====================
+  // CORE BOT CHANNELS
+  // =====================
 
   "logChannelId": "1456955298597175391",
-  "levelUpChannelId": "1456967580299559066",
 
-  "raffleWinnerChannelId": "1459609291710398519",
+  // Where giveaways are posted
+  "giveawayWinnerChannelId": "1456954533065392128",
 
-  "levelRoles": {
-    "2": "1462479094859038773",
-    "5": "1462479797304295535",
-    "8": "1462480092910587925",
-    "12": "1462480383328129075",
-    "16": "1462480917322010715",
-    "20": "1462480684496060728",
-    "25": "1462481138546381127",
-    "30": "1462481539391684760",
-    "40": "1462478268199600129",
-    "50": "1462478548961857844"
-  },
+  // Role to ping for giveaways (optional, leave "" to disable)
+  "giveawayRoleId": "",
 
-  "xpAllowedChannelIds": [],
-  "xpBlockedChannelIds": [],
 
+  // =====================
+  // RAFFLE CHANNELS
+  // =====================
+
+  // Parent channel where MAIN raffle threads are created
   "raffleCreateChannelId": "1463647751232552990",
+
+  // Channel where MINI raffle threads are created
   "miniCreateChannelId": "1463153415936020665",
-  "gambaRoleId": "1456957921005932585",
 
-  "giveawayChannelId": "1456954533065392128",
-  "giveawayWinnerChannelId": "1459609291710398519",
-  "giveawayRoleId": "1457667581459828839",
+  // Channel where raffle winners are announced
+  "raffleWinnerChannelId": "P1465032861991309467",
 
-  "miniClaimWindowMinutes": 5,
-  "miniDefaultSlots": 6
+  // Role to ping when raffles start (optional)
+  "gambaRoleId": "",
+
+
+  // =====================
+  // MINI RAFFLE SETTINGS
+  // =====================
+
+  // Default number of slots if not specified in !mini
+  "miniDefaultSlots": 6,
+
+  // How long (minutes) a mini winner has to claim main slots
+  "miniClaimWindowMinutes": 10,
+
+
+  // =====================
+  // BOARD / ANNOUNCEMENT TUNING
+  // =====================
+
+  // Announce available slots after this many claims
+  "availableAfterClaimed": 10,
+
+  // Announce availability every X claims
+  "availableAnnounceEvery": 5,
+
+  // Max numbers to show in availability messages
+  "availableMaxToShow": 40
 }
