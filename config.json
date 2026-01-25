@@ -1,4 +1,7 @@
 {
+  "clientId": "1462214316332679355",
+  "guildId": "1456735416156819578",
+
   "logChannelId": "1456955298597175391",
   "raffleCreateChannelId": "1463647751232552990",
   "miniCreateChannelId": "1463153415936020665",
@@ -12,7 +15,3 @@
   "availableAnnounceEvery": 5,
   "availableMaxToShow": 40
 }
-
-
-
-
