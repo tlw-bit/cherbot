@@ -1,56 +1,17 @@
 {
-  // =====================
-  // CORE BOT CHANNELS
-  // =====================
-
   "logChannelId": "1456955298597175391",
-
-  // Where giveaways are posted
-  "giveawayWinnerChannelId": "1456954533065392128",
-
-  // Role to ping for giveaways (optional, leave "" to disable)
-  "giveawayRoleId": "1457667581459828839",
-
-
-  // =====================
-  // RAFFLE CHANNELS
-  // =====================
-
-  // Parent channel where MAIN raffle threads are created
   "raffleCreateChannelId": "1463647751232552990",
-
-  // Channel where MINI raffle threads are created
   "miniCreateChannelId": "1463153415936020665",
-
-  // Channel where raffle winners are announced
   "raffleWinnerChannelId": "P1465032861991309467",
-
-  // Role to ping when raffles start (optional)
+  "giveawayRoleId": "1457667581459828839",
+  "giveawayWinnerChannelId": "1456954533065392128",
   "gambaRoleId": "1456957921005932585",
-
-
-  // =====================
-  // MINI RAFFLE SETTINGS
-  // =====================
-
-  // Default number of slots if not specified in !mini
+  "levelUpChannelId": "",
   "miniDefaultSlots": 6,
-
-  // How long (minutes) a mini winner has to claim main slots
   "miniClaimWindowMinutes": 10,
-
-
-  // =====================
-  // BOARD / ANNOUNCEMENT TUNING
-  // =====================
-
-  // Announce available slots after this many claims
   "availableAfterClaimed": 10,
-
-  // Announce availability every X claims
   "availableAnnounceEvery": 5,
-
-  // Max numbers to show in availability messages
   "availableMaxToShow": 40
 }
+
 
