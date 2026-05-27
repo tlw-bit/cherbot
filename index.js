@@ -15,7 +15,7 @@ const {
 } = require("discord.js");
 
 const config = require("./config.json");
-
+const mystery = require("./mystery.js");
 // -------------------- Client --------------------
 const client = new Client({
   intents: [
@@ -971,7 +971,8 @@ client.on("interactionCreate", async (interaction) => {
     // ---------- Slash Commands ----------
     if (!interaction.isChatInputCommand()) return;
     const name = interaction.commandName;
-
+const mysteryHandled = await mystery.handleInteraction(interaction, client);
+if (mysteryHandled) return;
     // /completedraffles
     if (name === "completedraffles") {
       await interaction.deferReply({ ephemeral: true }).catch(() => {});
