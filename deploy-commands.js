@@ -35,7 +35,6 @@ const commands = [
     .setName("roll")
     .setDescription("Roll the winner for a FULL raffle (main or mini). Mods/host only."),
 
-  // ✅ Everything raffle-related lives under /raffle
   new SlashCommandBuilder()
     .setName("raffle")
     .setDescription("Raffle commands")
@@ -103,6 +102,118 @@ const commands = [
           opt.setName("user").setDescription("User to split with").setRequired(true)
         )
     ),
+
+  // ── Murder Mystery ──
+  new SlashCommandBuilder()
+    .setName("mystery")
+    .setDescription("Murder mystery game")
+    .addSubcommand((sub) =>
+      sub.setName("start").setDescription("Start a new murder mystery game")
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("search")
+        .setDescription("Search a room for clues")
+        .addStringOption((opt) =>
+          opt
+            .setName("room")
+            .setDescription("Which room to search?")
+            .setRequired(true)
+            .addChoices(
+              { name: "Kitchen",       value: "Kitchen"       },
+              { name: "Dining Room",   value: "Dining Room"   },
+              { name: "Lounge",        value: "Lounge"        },
+              { name: "Hall",          value: "Hall"          },
+              { name: "Study",         value: "Study"         },
+              { name: "Library",       value: "Library"       },
+              { name: "Billiard Room", value: "Billiard Room" },
+              { name: "Conservatory",  value: "Conservatory"  },
+              { name: "Ballroom",      value: "Ballroom"      }
+            )
+        )
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("accuse")
+        .setDescription("Make your accusation to solve the case")
+        .addStringOption((opt) =>
+          opt
+            .setName("suspect")
+            .setDescription("Who did it?")
+            .setRequired(true)
+            .addChoices(
+              { name: "Miss Scarlett",   value: "Miss Scarlett"   },
+              { name: "Colonel Mustard", value: "Colonel Mustard" },
+              { name: "Mrs. White",      value: "Mrs. White"      },
+              { name: "Reverend Green",  value: "Reverend Green"  },
+              { name: "Mrs. Peacock",    value: "Mrs. Peacock"    },
+              { name: "Professor Plum",  value: "Professor Plum"  }
+            )
+        )
+        .addStringOption((opt) =>
+          opt
+            .setName("weapon")
+            .setDescription("What weapon?")
+            .setRequired(true)
+            .addChoices(
+              { name: "Revolver",     value: "Revolver"     },
+              { name: "Dagger",       value: "Dagger"       },
+              { name: "Lead Piping",  value: "Lead Piping"  },
+              { name: "Rope",         value: "Rope"         },
+              { name: "Spanner",      value: "Spanner"      },
+              { name: "Candlestick",  value: "Candlestick"  }
+            )
+        )
+        .addStringOption((opt) =>
+          opt
+            .setName("room")
+            .setDescription("In which room?")
+            .setRequired(true)
+            .addChoices(
+              { name: "Kitchen",       value: "Kitchen"       },
+              { name: "Dining Room",   value: "Dining Room"   },
+              { name: "Lounge",        value: "Lounge"        },
+              { name: "Hall",          value: "Hall"          },
+              { name: "Study",         value: "Study"         },
+              { name: "Library",       value: "Library"       },
+              { name: "Billiard Room", value: "Billiard Room" },
+              { name: "Conservatory",  value: "Conservatory"  },
+              { name: "Ballroom",      value: "Ballroom"      }
+            )
+        )
+    )
+    .addSubcommand((sub) =>
+      sub.setName("hint").setDescription("Get a hint (requires 3+ rooms searched)")
+    )
+    .addSubcommand((sub) =>
+      sub.setName("summary").setDescription("Review all clues discovered so far")
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("vote")
+        .setDescription("Vote for who you think the murderer is")
+        .addStringOption((opt) =>
+          opt
+            .setName("suspect")
+            .setDescription("Your vote")
+            .setRequired(true)
+            .addChoices(
+              { name: "Miss Scarlett",   value: "Miss Scarlett"   },
+              { name: "Colonel Mustard", value: "Colonel Mustard" },
+              { name: "Mrs. White",      value: "Mrs. White"      },
+              { name: "Reverend Green",  value: "Reverend Green"  },
+              { name: "Mrs. Peacock",    value: "Mrs. Peacock"    },
+              { name: "Professor Plum",  value: "Professor Plum"  }
+            )
+        )
+    )
+    .addSubcommand((sub) =>
+      sub.setName("tallyvotes").setDescription("Show the current vote tally")
+    )
+    .addSubcommand((sub) =>
+      sub.setName("toggleevents").setDescription("Toggle random atmospheric events on/off (mods only)")
+    ),
+
 ].map((c) => c.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(token);
