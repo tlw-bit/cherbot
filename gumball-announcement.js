@@ -227,12 +227,12 @@ const ext = new GEarthExtension({
 ext.on("packet", ({ header, body }) => {
   try {
     const bodyStr = body.toString("utf8");
+    console.log("[PACKET] Header:", header, "Body:", bodyStr.slice(0, 80));
     if (bodyStr.includes(MANAGER_NAME)) {
       console.log("[DEBUG] Found Manager packet! Body:", bodyStr.slice(0, 150));
       const message = parseChat(body);
       if (message && shouldPost(message)) {
         const player = extractPlayer(message);
-        console.log(`[Habbo] Manager: "${message}"${player ? ` → Player: ${player}` : ""}`);
         postToDiscord(message, player);
       }
     }
