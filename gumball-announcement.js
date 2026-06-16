@@ -20,7 +20,7 @@ const axios = require("axios");
 //  CONFIG — edit these
 // ──────────────────────────────────────────────
 const DISCORD_WEBHOOK_URL =
-  "https://discord.com/api/webhooks/https://discordapp.com/api/webhooks/1516357091961606215/zCPMpatbzooFr3t3THE_7LyiQd_R1ZH6B9KZc6L7UeWeMJJ4lD_JJhZ9egRNWu6bCRDV";
+ "https://discord.com/api/webhooks/1516357091961606215/zCPMpatbzooFr3t3THE_7LyiQd_R1ZH6B9KZc6L7UeWeMJJ4lD_JJhZ9egRNWu6bCRDV";
 
 const GEARTH_PORT = 9092;      // default G-Earth port
 const EXTENSION_NAME = "Habbo Announcer";
@@ -228,6 +228,7 @@ ext.on("packet", ({ header, body }) => {
   try {
     const bodyStr = body.toString("utf8");
     if (bodyStr.includes(MANAGER_NAME)) {
+      console.log("[DEBUG] Found Manager packet! Body:", bodyStr.slice(0, 150));
       const message = parseChat(body);
       if (message && shouldPost(message)) {
         const player = extractPlayer(message);
