@@ -1,5 +1,5 @@
 // ===================== CHUNK 1/4 =====================
-// Cherbot (Discord.js v14) — raffles + minis + giveaways (NO XP / NO LEVELS)
+// Cherbot (Discord.js v14) — raffles + minis (giveaways moved to Concierge)
 
 const fs = require("fs");
 const path = require("path");
@@ -32,7 +32,6 @@ const DATA_FILE = path.join(__dirname, "data.json");
 function loadData() {
   if (!fs.existsSync(DATA_FILE)) {
     return {
-      giveaways: {},
       raffles: {},
       reservations: {},
       miniThreads: {},
@@ -44,7 +43,6 @@ function loadData() {
 
   try {
     const parsed = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
-    if (!parsed.giveaways) parsed.giveaways = {};
     if (!parsed.raffles) parsed.raffles = {};
     if (!parsed.reservations) parsed.reservations = {};
     if (!parsed.miniThreads) parsed.miniThreads = {};
@@ -54,7 +52,6 @@ function loadData() {
     return parsed;
   } catch {
     return {
-      giveaways: {},
       raffles: {},
       reservations: {},
       miniThreads: {},
@@ -71,10 +68,6 @@ function saveData(obj) {
 
 let data = loadData();
 
-function ensureGiveawayData() {
-  if (!data.giveaways) data.giveaways = {};
-}
-
 function ensureRaffleData() {
   if (!data.raffles) data.raffles = {};
   if (!data.reservations) data.reservations = {};
@@ -84,8 +77,8 @@ function ensureRaffleData() {
   if (!data.miniEntitlements) data.miniEntitlements = {};
 }
 
-// -------------------- Giveaway scheduling (NO SWEEP) --------------------
-const giveawayTimers = new Map(); // messageId -> timeout
+// -------------------- Raffle timer scheduling (NO SWEEP) --------------------
+const giveawayTimers = new Map(); // messageId -> timeout (kept name for the main-raffle auto-end timer)
 
 function clearGiveawayTimer(messageId) {
   const t = giveawayTimers.get(messageId);
@@ -133,14 +126,7 @@ function scheduleGiveawayEnd(client, messageId, endsAt) {
 // -------------------- Ready --------------------
 client.once("ready", () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
-  ensureGiveawayData();
   ensureRaffleData();
-
-  // Re-schedule active giveaways
-  for (const [messageId, g] of Object.entries(data.giveaways || {})) {
-    if (!g || g.ended || !g.endsAt) continue;
-    scheduleGiveawayEnd(client, messageId, g.endsAt);
-  }
 
   // Re-schedule active main raffles with timers
   for (const [key, r] of Object.entries(data.raffles || {})) {
@@ -182,11 +168,6 @@ function canRunRaffles(memberOrUser, channel) {
 
 function gambaMention() {
   const rid = String(config.gambaRoleId || "").trim();
-  return rid ? `<@&${rid}>` : "";
-}
-
-function giveawayMention() {
-  const rid = String(config.giveawayRoleId || "").trim();
   return rid ? `<@&${rid}>` : "";
 }
 
@@ -245,7 +226,7 @@ function makeToyCode() {
   return "cher-" + Math.random().toString(36).slice(2, 8).toUpperCase();
 }
 // ===================== CHUNK 2/4 =====================
-// -------------------- Giveaway helpers --------------------
+// -------------------- Raffle duration helper --------------------
 function parseDurationToMs(input) {
   const s = String(input || "").trim().toLowerCase();
   const m = s.match(/^(\d+)\s*([mhd])$/i);
@@ -259,16 +240,6 @@ function parseDurationToMs(input) {
   if (unit === "h") return n * 60 * 60 * 1000;
   if (unit === "d") return n * 24 * 60 * 60 * 1000;
   return null;
-}
-
-function pickWinnersFrom(array, count) {
-  const pool = [...new Set(array)];
-  const winners = [];
-  while (pool.length && winners.length < count) {
-    const idx = randInt(0, pool.length - 1);
-    winners.push(pool.splice(idx, 1)[0]);
-  }
-  return winners;
 }
 
 // -------------------- Raffle / Mini helpers --------------------
@@ -794,13 +765,13 @@ async function postOrUpdateBoard(channel, raffle, mainKey = null, title = "🎟�
   }
 }
 // ===================== CHUNK 3/4 =====================
-// -------------------- endGiveawayByMessageId (includes mainraffle auto-end) --------------------
+// -------------------- endGiveawayByMessageId (main-raffle auto-end only) --------------------
+// Kept the original function name so the timer-scheduling code above didn't need touching.
 async function endGiveawayByMessageId(client, messageId, { reroll = false } = {}) {
-  ensureGiveawayData();
   ensureRaffleData();
   clearGiveawayTimer(messageId);
 
-  // Main raffle auto-end path
+  // Main raffle auto-end path — this is the only thing this function does now.
   if (String(messageId).startsWith("mainraffle:")) {
     const channelId = String(messageId).split(":")[1];
 
@@ -841,84 +812,7 @@ async function endGiveawayByMessageId(client, messageId, { reroll = false } = {}
     return { ok: true, winners: [] };
   }
 
-  // Normal giveaway end
-  const g = data.giveaways?.[messageId];
-  if (!g) return { ok: false, reason: "Giveaway not found." };
-  if (g.ended && !reroll) return { ok: false, reason: "Giveaway already ended." };
-
-  const guild = client.guilds.cache.get(g.guildId);
-  if (!guild) return { ok: false, reason: "Guild not available." };
-
-  const gwChannel = await guild.channels.fetch(g.channelId).catch(() => null);
-  if (!gwChannel || !gwChannel.isTextBased()) return { ok: false, reason: "Giveaway channel not found." };
-
-  const participants = Array.isArray(g.participants) ? g.participants : [];
-  const winners = pickWinnersFrom(participants, Number(g.winners) || 1);
-
-  g.ended = true;
-  g.endedAt = Date.now();
-  g.lastWinners = winners;
-  data.giveaways[messageId] = g;
-  saveData(data);
-
-  const prize = g.prize || "Giveaway";
-  const winnerText = winners.length ? winners.map((id) => `<@${id}>`).join(", ") : "_No valid entries_";
-  const endedUnix = Math.floor((g.endedAt || Date.now()) / 1000);
-
-  await safetyLog(guild, {
-    title: reroll ? "🔁 Giveaway Rerolled" : "🏁 Giveaway Ended",
-    fields: [
-      { name: "Channel", value: `<#${g.channelId}>`, inline: true },
-      { name: "Message", value: String(messageId), inline: true },
-      { name: "Prize", value: String(prize).slice(0, 1024), inline: false },
-      { name: "Winners", value: String(winnerText).slice(0, 1024), inline: false },
-      { name: "Ended", value: `<t:${endedUnix}:F>`, inline: true },
-    ],
-    color: 0xe67e22,
-  });
-
-  const announceEmbed = new EmbedBuilder()
-    .setTitle(reroll ? "🔁 Giveaway Rerolled" : "🏁 Giveaway Ended")
-    .setDescription(`**Prize:** ${prize}\n**Winners:** ${winnerText}\n**Ended:** <t:${endedUnix}:F>`)
-    .setTimestamp();
-
-  const winnerChannelId = String(config.giveawayWinnerChannelId || "").trim();
-  let winCh = null;
-  if (winnerChannelId) winCh = await guild.channels.fetch(winnerChannelId).catch(() => null);
-  const targetCh = winCh && winCh.isTextBased?.() ? winCh : gwChannel;
-
-  await targetCh
-    .send({
-      content: winners.length ? winnerText : "",
-      embeds: [announceEmbed],
-      allowedMentions: winners.length ? { users: winners } : undefined,
-    })
-    .catch(() => {});
-
-  // disable button + update original giveaway message
-  try {
-    const msg = await gwChannel.messages.fetch(messageId);
-
-    const disabledRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`giveaway:enter:${messageId}`)
-        .setLabel("Giveaway Ended")
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(true)
-    );
-
-    const originalEmbed = msg.embeds?.[0];
-    const endedEmbed = originalEmbed
-      ? EmbedBuilder.from(originalEmbed)
-          .setTitle(reroll ? "🔁 Giveaway Rerolled" : "🏁 Giveaway Ended")
-          .setDescription(`**Prize:** ${prize}\n**Winners:** ${winnerText}\n**Ended:** <t:${endedUnix}:F>`)
-          .setTimestamp()
-      : announceEmbed;
-
-    await msg.edit({ embeds: [endedEmbed], components: [disabledRow] }).catch(() => {});
-  } catch {}
-
-  return { ok: true, winners };
+  return { ok: false, reason: "Unknown timer type." };
 }
 
 // -------------------- MESSAGE CREATE (only !code) --------------------
@@ -943,28 +837,6 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.isButton()) {
       const id = interaction.customId;
       await interaction.deferReply({ ephemeral: true }).catch(() => {});
-
-      if (id.startsWith("giveaway:enter:")) {
-        ensureGiveawayData();
-
-        const messageId = id.split(":")[2];
-        const g = data.giveaways?.[messageId];
-
-        if (!g) return interaction.editReply({ content: "❌ This giveaway no longer exists." });
-        if (g.ended) return interaction.editReply({ content: "❌ This giveaway has ended." });
-
-        if (!Array.isArray(g.participants)) g.participants = [];
-        if (g.participants.includes(interaction.user.id)) {
-          return interaction.editReply({ content: "✅ You’re already entered!" });
-        }
-
-        g.participants.push(interaction.user.id);
-        data.giveaways[messageId] = g;
-        saveData(data);
-
-        return interaction.editReply({ content: `✅ Entered! Entries: **${g.participants.length}**` });
-      }
-
       return interaction.editReply({ content: "❌ Unknown button." }).catch(() => {});
     }
 
@@ -1013,79 +885,6 @@ if (mysteryHandled) return;
       return interaction.editReply(lines.join("\n").slice(0, 1900));
     }
 
-    // /giveaway
-    if (name === "giveaway") {
-      await interaction.deferReply({ ephemeral: true }).catch(() => {});
-      const isMod = isModMember(interaction.member);
-      if (!isMod) return interaction.editReply("❌ Mods only.");
-
-      ensureGiveawayData();
-
-      const prize = interaction.options.getString("prize", true);
-      const durationRaw = interaction.options.getString("duration", true);
-      const winnersCount = interaction.options.getInteger("winners") ?? 1;
-
-      const durationMs = parseDurationToMs(durationRaw);
-      if (!durationMs) return interaction.editReply("❌ Duration must be like `10m`, `2h`, or `1d`.");
-
-      if (!Number.isFinite(winnersCount) || winnersCount < 1 || winnersCount > 50) {
-        return interaction.editReply("❌ Winners must be between 1 and 50.");
-      }
-
-      const endsAt = Date.now() + durationMs;
-      const endsUnix = Math.floor(endsAt / 1000);
-
-      const embed = new EmbedBuilder()
-        .setTitle("🎉 Giveaway")
-        .setDescription(
-          `**Prize:** ${prize}\n` +
-            `**Winners:** ${winnersCount}\n` +
-            `**Ends:** <t:${endsUnix}:R>\n\n` +
-            `Click **Enter** to join!`
-        )
-        .setTimestamp();
-
-      const rowTemp = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId("giveaway:enter:temp").setLabel("Enter Giveaway").setStyle(ButtonStyle.Success)
-      );
-
-      const ch = interaction.channel;
-      if (!ch || !ch.isTextBased?.()) return interaction.editReply("❌ Use this in a text channel or thread.");
-
-      const mention = giveawayMention();
-      const msg = await ch
-        .send({
-          content: mention || "",
-          embeds: [embed],
-          components: [rowTemp],
-          allowedMentions: mention ? { parse: ["roles"] } : { parse: [] },
-        })
-        .catch(() => null);
-
-      if (!msg) return interaction.editReply("❌ I couldn’t post the giveaway (check permissions).");
-
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`giveaway:enter:${msg.id}`).setLabel("Enter Giveaway").setStyle(ButtonStyle.Success)
-      );
-
-      await msg.edit({ components: [row] }).catch(() => {});
-
-      data.giveaways[msg.id] = {
-        guildId: interaction.guildId,
-        channelId: ch.id,
-        prize,
-        winners: winnersCount,
-        participants: [],
-        ended: false,
-        createdAt: Date.now(),
-        endsAt,
-      };
-      saveData(data);
-
-      scheduleGiveawayEnd(client, msg.id, endsAt);
-      return interaction.editReply(`✅ Giveaway created! Ends <t:${endsUnix}:R>`);
-    }
-
     // /raffle (all subs)
     if (name === "raffle") {
       const sub = interaction.options.getSubcommand();
@@ -1121,7 +920,6 @@ if (mysteryHandled) return;
       await interaction.deferReply({ ephemeral: true }).catch(() => {});
 
       ensureRaffleData();
-      ensureGiveawayData();
 
       const canRaffle = canRunRaffles(interaction.member, ch);
       const isMod = isModMember(interaction.member);
@@ -1691,4 +1489,3 @@ if (!token) {
   process.exit(1);
 }
 client.login(token).catch(console.error);
-
