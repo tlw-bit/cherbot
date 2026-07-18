@@ -1,13 +1,6 @@
-Got it — I've **fully removed all Habbo account linking/unlinking functionality** from the merged code, along with related references, while keeping all other Astra features (XP, levels, events, trivia, badges, leaderboards) and your original Cherbot raffle/mini systems intact.
-
----
-
-## ✅ Final Merged Code (Linking Removed)
-```js
-// ===================== CHUNK 1/5 =====================
-// Cherbot (Discord.js v14) — Raffle + Minis + Astra Features
-// Added: XP/Levels, Badge Scouter, Events, Trivia, What's New
-// Removed: Verification, Giveaways, ALL Habbo Linking
+// Cherbot + Astra Merge — Discord.js v14
+// ✅ Kept: Raffle, Minis, Scouter Badges, XP/Levels, Trivia, Badge Scouter
+// ❌ Removed: Duplicate events, giveaways, murder mystery, Habbo linking
 
 const fs = require("fs");
 const path = require("path");
@@ -26,10 +19,9 @@ const {
 } = require("discord.js");
 
 const config = require("./config.json");
-const mystery = require("./mystery.js");
 
 // ==============================================
-// ✅ ASTRA CONFIGURATION — ADD THESE TO YOUR config.json TOO
+// ✅ XP / TRIVIA / BADGE SCOUTER CONFIG
 // ==============================================
 const ASTRA_CONFIG = {
   DISCORD_TOKEN: config.token || process.env.DISCORD_TOKEN,
@@ -42,9 +34,8 @@ const ASTRA_CONFIG = {
   STAFF_ROLE_ID: config.staffRoleId || "",
 
   XP_COOLDOWN_SECONDS: config.xpCooldown || 60,
-  EVENT_XP_AWARD: config.eventXp || 50,
   TRIVIA_DEFAULT_XP: config.triviaXp || 25,
-  EVENT_CLOSE_DELAY: 2 * 60 * 60 * 1000, // 2 hours
+  BADGE_SCAN_INTERVAL: 6 * 60 * 60 * 1000, // Every 6 hours
 
   XP_REWARDS: config.xpRewards || [
     { level: 2, xpNeeded: 100, reward: "Newbie Badge" },
@@ -55,19 +46,18 @@ const ASTRA_CONFIG = {
   ]
 };
 
-// What's New Info
 const whatsNewData = {
-  version: "1.8.1",
+  version: "2.0.0",
   last_updated: "18 July 2026",
   updates: [
-    "✅ Added full XP, levels & rewards system",
+    "✅ Merged Cherbot + Astra systems",
+    "✅ Full XP, levels & rewards system added",
     "✅ Automatic new Habbo badge scouter",
-    "✅ Event attendance tracking & XP rewards",
     "✅ Trivia system with XP rewards",
-    "✅ /whatsnew command to see latest changes",
-    "✅ Badge codes & info lookup",
-    "✅ Leaderboards for weekly/all-time XP",
-    "✅ Removed verification, giveaways & Habbo linking systems"
+    "✅ Weekly/all-time leaderboards",
+    "✅ /whatsnew command for updates",
+    "✅ Removed duplicate events, giveaways & murder mystery",
+    "✅ Removed Habbo linking/verification"
   ]
 };
 
@@ -75,7 +65,6 @@ const whatsNewData = {
 const DATA_FILES = {
   MAIN: path.join(__dirname, "data.json"),
   XP_DATA: path.join(__dirname, "xpData.json"),
-  EVENTS_DATA: path.join(__dirname, "eventsData.json"),
   TRIVIA_DATA: path.join(__dirname, "triviaData.json"),
   BADGES_DATA: path.join(__dirname, "scoutedBadges.json")
 };
@@ -83,7 +72,6 @@ const DATA_FILES = {
 // Initialize missing data files
 const defaultData = {
   xpData: { users: {}, lastReset: Date.now() },
-  eventsData: { list: [] },
   triviaData: { themes: {}, current: null },
   scoutedBadges: { knownBadges: [] }
 };
@@ -94,13 +82,12 @@ Object.entries(DATA_FILES).forEach(([key, filePath]) => {
   }
 });
 
-// Load saved Astra data
+// Load all data
 let xpData = JSON.parse(fs.readFileSync(DATA_FILES.XP_DATA, 'utf8'));
-let eventsData = JSON.parse(fs.readFileSync(DATA_FILES.EVENTS_DATA, 'utf8'));
 let triviaData = JSON.parse(fs.readFileSync(DATA_FILES.TRIVIA_DATA, 'utf8'));
 let scoutedBadges = JSON.parse(fs.readFileSync(DATA_FILES.BADGES_DATA, 'utf8'));
 
-// -------------------- Client --------------------
+// -------------------- Client Setup --------------------
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -111,7 +98,7 @@ const client = new Client({
   ],
 });
 
-// -------------------- Data storage (Original Cherbot) --------------------
+// -------------------- Original Cherbot Data Helpers --------------------
 const DATA_FILE = DATA_FILES.MAIN;
 
 function loadData() {
@@ -126,7 +113,6 @@ function loadData() {
       scouterBadges: {},
     };
   }
-
   try {
     const parsed = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
     if (!parsed.raffles) parsed.raffles = {};
@@ -166,11 +152,10 @@ function ensureRaffleData() {
   if (!data.scouterBadges) data.scouterBadges = {};
 }
 
-// -------------------- SCOUTER BADGE HELPERS --------------------
+// -------------------- Scouter Badge Helpers --------------------
 function giveScouterBadge(userId, givenBy, reason = "No reason provided") {
   const uid = normalizeUserId(userId);
   if (!uid) return false;
-  
   data.scouterBadges[uid] = {
     givenAt: Date.now(),
     givenBy: normalizeUserId(givenBy) || givenBy,
@@ -193,7 +178,7 @@ function removeScouterBadge(userId) {
   return true;
 }
 
-// -------------------- ASTRA SHARED HELPERS --------------------
+// -------------------- Shared Astra Helpers --------------------
 function saveJson(filePath, data) {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
 }
@@ -236,13 +221,11 @@ function addXp(userId, amount, reason = "No reason given") {
   const logChannel = client.channels.cache.get(ASTRA_CONFIG.XP_LOG_CHANNEL_ID);
   if (logChannel) {
     logChannel.send({
-      embeds: [
-        new EmbedBuilder()
-          .setTitle("📈 XP Awarded")
-          .setDescription(`<@${userId}> received **${amount} XP**\nReason: ${reason}`)
-          .setColor("#2ecc71")
-          .setTimestamp()
-      ]
+      embeds: [new EmbedBuilder()
+        .setTitle("📈 XP Awarded")
+        .setDescription(`<@${userId}> received **${amount} XP**\nReason: ${reason}`)
+        .setColor("#2ecc71")
+        .setTimestamp()]
     }).catch(() => {});
   }
 
@@ -250,7 +233,7 @@ function addXp(userId, amount, reason = "No reason given") {
   return { leveledUp: newLevel > user.currentLevel, newLevel };
 }
 
-function removeXp(userId, amount, reason = "Adjustment") {
+function removeXp(userId, amount) {
   const user = ensureUser(userId);
   user.weeklyXp = Math.max(0, user.weeklyXp - amount);
   user.allTimeXp = Math.max(0, user.allTimeXp - amount);
@@ -264,8 +247,8 @@ async function scoutNewBadges() {
       headers: { "Accept": "application/json" }
     });
     if (!res.ok) throw new Error("API request failed");
-    const data = await res.json();
-    const allBadges = data.badges || [];
+    const badgeData = await res.json();
+    const allBadges = badgeData.badges || [];
     const knownCodes = new Set(scoutedBadges.knownBadges.map(b => b.code));
     const newBadges = allBadges.filter(b => !knownCodes.has(b.code));
 
@@ -274,15 +257,13 @@ async function scoutNewBadges() {
       if (channel) {
         for (const badge of newBadges.slice(0, 5)) {
           await channel.send({
-            embeds: [
-              new EmbedBuilder()
-                .setTitle("🆕 New Habbo Badge")
-                .setDescription(`**Name:** ${badge.name || "Unnamed"}\n**Description:** ${badge.description || "No details available"}`)
-                .setThumbnail(badge.url_habbo)
-                .setColor("#9b59b6")
-                .setFooter({ text: `Code: ${badge.code}` })
-                .setTimestamp()
-            ]
+            embeds: [new EmbedBuilder()
+              .setTitle("🆕 New Habbo Badge")
+              .setDescription(`**Name:** ${badge.name || "Unnamed"}\n**Description:** ${badge.description || "No details available"}`)
+              .setThumbnail(badge.url_habbo)
+              .setColor("#9b59b6")
+              .setFooter({ text: `Code: ${badge.code}` })
+              .setTimestamp()]
           });
         }
       }
@@ -296,58 +277,7 @@ async function scoutNewBadges() {
   }
 }
 
-// ===================== CHUNK 2/5 =====================
-// -------------------- Original Cherbot Helpers --------------------
-const giveawayTimers = new Map();
-
-function clearGiveawayTimer(messageId) {
-  const t = giveawayTimers.get(messageId);
-  if (t) clearTimeout(t);
-  giveawayTimers.delete(messageId);
-}
-
-function scheduleGiveawayEnd(client, messageId, endsAt) {
-  if (!messageId || !endsAt) return;
-  clearGiveawayTimer(messageId);
-  const MAX_DELAY = 2147480000;
-  const delay = Number(endsAt) - Date.now();
-  if (!Number.isFinite(delay)) return;
-  if (delay <= 0) {
-    const t = setTimeout(() => {
-      giveawayTimers.delete(messageId);
-      endGiveawayByMessageId(client, messageId).catch((e) =>
-        console.error("❌ scheduled end failed:", messageId, e?.stack || e)
-      );
-    }, 250);
-    giveawayTimers.set(messageId, t);
-    return;
-  }
-  if (delay > MAX_DELAY) {
-    const t = setTimeout(() => scheduleGiveawayEnd(client, messageId, endsAt), MAX_DELAY);
-    giveawayTimers.set(messageId, t);
-    return;
-  }
-  const t = setTimeout(() => {
-    giveawayTimers.delete(messageId);
-    endGiveawayByMessageId(client, messageId).catch((e) =>
-      console.error("❌ scheduled end failed:", messageId, e?.stack || e)
-    );
-  }, delay + 250);
-  giveawayTimers.set(messageId, t);
-}
-
-client.once("ready", () => {
-  console.log(`✅ Logged in as ${client.user.tag}`);
-  ensureRaffleData();
-  for (const [key, r] of Object.entries(data.raffles || {})) {
-    if (!r?.active || !r?.endsAt) continue;
-    const channelId = key.split(":")[1];
-    scheduleGiveawayEnd(client, `mainraffle:${channelId}`, r.endsAt);
-  }
-  // Auto-scout badges every 6 hours
-  setInterval(scoutNewBadges, 6 * 60 * 60 * 1000);
-});
-
+// -------------------- Cherbot Core Helpers --------------------
 function randInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
@@ -575,7 +505,6 @@ function isRaffleFull(raffle) {
   return raffle.max > 0 && countClaimedSlots(raffle) >= raffle.max;
 }
 
-// UPDATED Board with Scouter Badge marker
 function formatBoardEmbed(raffle, mainKey = null, title = "🎟️ Raffle Board") {
   const closed = !raffle.active || isRaffleFull(raffle);
   const max = Number(raffle.max) || 0;
@@ -857,43 +786,23 @@ async function postOrUpdateBoard(channel, raffle, mainKey = null, title = "🎟�
   } catch (err) { console.error("❌ postOrUpdateBoard error:", err?.message || err); }
 }
 
-// ===================== CHUNK 3/5 =====================
-async function endGiveawayByMessageId(client, messageId, { reroll = false } = {}) {
+// -------------------- Bot Ready --------------------
+client.once("ready", () => {
+  console.log(`✅ Logged in as ${client.user.tag}`);
   ensureRaffleData();
-  clearGiveawayTimer(messageId);
-  if (String(messageId).startsWith("mainraffle:")) {
-    const channelId = String(messageId).split(":")[1];
-    let foundKey = null;
-    let r = null;
-    for (const [key, rr] of Object.entries(data.raffles || {})) {
-      if (key.endsWith(`:${channelId}`)) { foundKey = key; r = rr; break; }
-    }
-    if (!foundKey || !r) return { ok: false, reason: "Main raffle not found." };
-    const [guildId] = foundKey.split(":");
-    const guild = client.guilds.cache.get(guildId);
-    if (!guild) return { ok: false, reason: "Guild not available." };
-    const mainThread = await guild.channels.fetch(channelId).catch(() => null);
-    if (!mainThread || !mainThread.isTextBased?.()) return { ok: false, reason: "Main thread not found." };
-    r.active = false;
-    r.endedAt = Date.now();
-    delete r.endsAt;
-    saveData(data);
-    const mainKey = raffleKey(guildId, channelId);
-    await postOrUpdateBoard(mainThread, r, mainKey, "🎟️ Main Board");
-    if (isRaffleFull(r)) await handleFullRaffle(mainThread, r);
-    else await mainThread.send(`⏲️ **Timer ended:** Main raffle auto-closed at <t:${Math.floor(r.endedAt / 1000)}:F>`).catch(() => {});
-    return { ok: true, winners: [] };
-  }
-  return { ok: false, reason: "Unknown timer type." };
-}
+  // Start badge scouter
+  scoutNewBadges();
+  setInterval(scoutNewBadges, ASTRA_CONFIG.BADGE_SCAN_INTERVAL);
+});
 
+// -------------------- Message Handler (XP + Trivia) --------------------
 client.on("messageCreate", async (message) => {
   try {
     if (!message.guild || message.author.bot) return;
     const content = message.content.trim();
     if (content.toLowerCase() === "!code") return message.reply(`🧾 Cherbot code: **${makeToyCode()}**`).catch(() => {});
 
-    // Astra Chat XP & Trivia
+    // Chat XP
     const userId = message.author.id;
     const user = ensureUser(userId);
     const now = Date.now();
@@ -902,6 +811,8 @@ client.on("messageCreate", async (message) => {
       user.lastXp = now;
       saveJson(DATA_FILES.XP_DATA, xpData);
     }
+
+    // Trivia Answer Check
     if (triviaData.current?.active) {
       const currentQ = triviaData.themes[triviaData.current.theme]?.questions[triviaData.current.index];
       if (currentQ && !triviaData.current.answers.has(userId)) {
@@ -917,7 +828,7 @@ client.on("messageCreate", async (message) => {
   } catch (err) { console.error("messageCreate error:", err?.stack || err); }
 });
 
-// Invite Tracking
+// -------------------- Invite Tracking --------------------
 let cachedInvites = new Map();
 client.on('inviteCreate', invite => {
   if (invite.guild.id === ASTRA_CONFIG.GUILD_ID) cachedInvites.set(invite.code, { uses: invite.uses || 0, inviterId: invite.inviter?.id });
@@ -942,7 +853,7 @@ client.on('guildMemberAdd', async member => {
   }
 });
 
-// ===================== CHUNK 4/5 =====================
+// -------------------- Interaction Handler --------------------
 client.on("interactionCreate", async (interaction) => {
   try {
     if (interaction.isButton()) {
@@ -957,29 +868,14 @@ client.on("interactionCreate", async (interaction) => {
         );
         return interaction.showModal(modal);
       }
-
-      if (id.startsWith("attend_event_")) {
-        const eventId = parseInt(id.replace("attend_event_", ""));
-        const event = eventsData.list.find(e => e.id === eventId && Date.now() < e.startTime + ASTRA_CONFIG.EVENT_CLOSE_DELAY);
-        if (!event) return interaction.editReply({ content: "❌ Event ended or not found." });
-        const user = ensureUser(interaction.user.id);
-        if (user.eventsJoined.includes(eventId)) return interaction.editReply({ content: "✅ You have already marked attendance." });
-        addXp(interaction.user.id, event.xp, `Attended event: ${event.title}`);
-        user.eventsJoined.push(eventId);
-        saveJson(DATA_FILES.XP_DATA, xpData);
-        return interaction.editReply({ content: `✅ Attendance recorded! +${event.xp} XP` });
-      }
-
       return interaction.editReply({ content: "❌ Unknown button." });
     }
 
     if (!interaction.isChatInputCommand()) return;
     const name = interaction.commandName;
-    const mysteryHandled = await mystery.handleInteraction(interaction, client);
-    if (mysteryHandled) return;
     const isStaff = interaction.member.permissions.has(PermissionsBitField.Flags.ManageGuild) || interaction.member.roles.cache.has(ASTRA_CONFIG.STAFF_ROLE_ID);
 
-    // -------------------- ASTRA COMMANDS --------------------
+    // -------------------- Astra Commands --------------------
     if (name === "whatsnew") {
       const desc = whatsNewData.updates.map(item => `• ${item}`).join("\n");
       const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("suggest_from_whatsnew").setLabel("💡 Submit Suggestion").setStyle(ButtonStyle.Primary));
@@ -995,27 +891,25 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     if (name === "profile") {
-      const target = interaction.options.getUser("user") ? interaction.options.getUser("user") : interaction.user;
-      const data = ensureUser(target.id);
+      const target = interaction.options.getUser("user") || interaction.user;
+      const userData = ensureUser(target.id);
       return interaction.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setTitle(`👤 ${target.username}`)
-            .setColor("#2980b9")
-            .addFields(
-              { name: "Current Level", value: `${data.currentLevel}`, inline: true },
-              { name: "Weekly XP", value: `${data.weeklyXp} / ${getXpForLevel(data.currentLevel + 1)}`, inline: true },
-              { name: "All-Time XP", value: `${data.allTimeXp}`, inline: true },
-              { name: "Events Attended", value: `${data.eventsJoined.length}`, inline: true },
-              { name: "Trivia Correct", value: `${data.triviaCorrect}`, inline: true }
-            )
-        ]
+        embeds: [new EmbedBuilder()
+          .setTitle(`👤 ${target.username}`)
+          .setColor("#2980b9")
+          .addFields(
+            { name: "Current Level", value: `${userData.currentLevel}`, inline: true },
+            { name: "Weekly XP", value: `${userData.weeklyXp} / ${getXpForLevel(userData.currentLevel + 1)}`, inline: true },
+            { name: "All-Time XP", value: `${userData.allTimeXp}`, inline: true },
+            { name: "Highest Level", value: `${userData.highestLevel}`, inline: true },
+            { name: "Trivia Correct", value: `${userData.triviaCorrect}`, inline: true }
+          )]
       });
     }
 
     if (name === "leaderboard") {
       const type = interaction.options.getString("type") || "weekly";
-      const sorted = Object.entries(xpData.users).sort((a, b) => {
+      const sorted = Object.entries(xpData.users || {}).sort((a, b) => {
         if (type === "alltime") return (b[1].highestLevel * 1000000 + b[1].allTimeXp) - (a[1].highestLevel * 1000000 + a[1].allTimeXp);
         return (b[1].currentLevel * 1000 + b[1].weeklyXp) - (a[1].currentLevel * 1000 + a[1].weeklyXp);
       }).slice(0, 10);
@@ -1023,11 +917,11 @@ client.on("interactionCreate", async (interaction) => {
       const title = type === "alltime" ? "🏆 All-Time Leaderboard" : "📅 Weekly Leaderboard";
       const list = sorted.map(([id, d], i) => {
         const member = interaction.guild.members.cache.get(id);
-        const name = member ? member.displayName : "Unknown";
-        return `**${i + 1}.** ${name} • Lv ${type === "alltime" ? d.highestLevel : d.currentLevel} • ${type === "alltime" ? d.allTimeXp : d.weeklyXp} XP`;
+        const displayName = member ? member.displayName : "Unknown";
+        return `**${i + 1}.** ${displayName} • Lv ${type === "alltime" ? d.highestLevel : d.currentLevel} • ${type === "alltime" ? d.allTimeXp : d.weeklyXp} XP`;
       }).join("\n") || "No data available yet.";
-      // ===================== CHUNK 5/5 — FINAL PORTION =====================
-      });
+
+      return interaction.reply({ embeds: [new EmbedBuilder().setTitle(title).setDescription(list).setColor("#f1c40f")] });
     }
 
     if (name === "trivia") {
@@ -1035,29 +929,56 @@ client.on("interactionCreate", async (interaction) => {
       const action = interaction.options.getString("action");
       const theme = interaction.options.getString("theme") || "general";
 
-      if (action === "start") {
-        const xpPer = interaction.options.getInteger("xp") || ASTRA_CONFIG.TRIVIA_DEFAULT_XP;
+      if (action === "addtheme") {
+        if (!triviaData.themes[theme]) triviaData.themes[theme] = { questions: [] };
+        saveJson(DATA_FILES.TRIVIA_DATA, triviaData);
+        return interaction.reply({ content: `✅ Theme **${theme}** created.` });
+      }
+
+      if (action === "addquestion") {
         const question = interaction.options.getString("question");
         const answer = interaction.options.getString("answer");
+        if (!triviaData.themes[theme]) return interaction.reply({ content: "❌ Theme not found.", ephemeral: true });
+        triviaData.themes[theme].questions.push({ q: question, a: answer });
+        saveJson(DATA_FILES.TRIVIA_DATA, triviaData);
+        return interaction.reply({ content: "✅ Question added." });
+      }
 
-        if (!triviaData.themes[theme]) triviaData.themes[theme] = { questions: [] };
+      if (action === "start") {
+        const xpPer = interaction.options.getInteger("xp") || ASTRA_CONFIG.TRIVIA_DEFAULT_XP;
+        if (!triviaData.themes[theme]?.questions?.length) return interaction.reply({ content: "❌ Theme has no questions.", ephemeral: true });
         triviaData.current = {
           theme,
-          question,
-          answer: answer.toLowerCase(),
           xpPer,
-          active: true,
-          answers: new Set()
+          index: 0,
+          answers: new Set(),
+          active: true
         };
         saveJson(DATA_FILES.TRIVIA_DATA, triviaData);
-
+        const firstQ = triviaData.themes[theme].questions[0];
         return interaction.reply({
           embeds: [new EmbedBuilder()
-            .setTitle("🧠 Trivia Started!")
-            .setDescription(`**Question:** ${question}\n**XP Reward:** ${xpPer} XP`)
-            .setColor("#9b59b6")
-            .setFooter({ text: `Theme: ${theme}` })
-          ]
+            .setTitle(`🧠 Trivia: ${theme}`)
+            .setDescription(`**Question:** ${firstQ.q}\n**Reward:** ${xpPer} XP`)
+            .setColor("#9b59b6")]
+        });
+      }
+
+      if (action === "next") {
+        if (!triviaData.current?.active) return interaction.reply({ content: "❌ No active trivia.", ephemeral: true });
+        triviaData.current.index++;
+        const nextQ = triviaData.themes[triviaData.current.theme].questions[triviaData.current.index];
+        if (!nextQ) {
+          triviaData.current = null;
+          saveJson(DATA_FILES.TRIVIA_DATA, triviaData);
+          return interaction.reply({ content: "✅ Trivia finished!" });
+        }
+        triviaData.current.answers.clear();
+        saveJson(DATA_FILES.TRIVIA_DATA, triviaData);
+        return interaction.reply({
+          embeds: [new EmbedBuilder()
+            .setDescription(`**Question:** ${nextQ.q}\n**Reward:** ${triviaData.current.xpPer} XP`)
+            .setColor("#9b59b6")]
         });
       }
 
@@ -1065,48 +986,6 @@ client.on("interactionCreate", async (interaction) => {
         triviaData.current = null;
         saveJson(DATA_FILES.TRIVIA_DATA, triviaData);
         return interaction.reply({ content: "✅ Trivia ended." });
-      }
-    }
-
-    if (name === "event") {
-      if (!isStaff) return interaction.reply({ content: "❌ Only staff can manage events.", ephemeral: true });
-      const action = interaction.options.getString("action");
-
-      if (action === "create") {
-        const title = interaction.options.getString("title");
-        const description = interaction.options.getString("description") || "No description provided.";
-        const startTime = interaction.options.getInteger("timestamp") * 1000;
-        const xp = interaction.options.getInteger("xp") || ASTRA_CONFIG.EVENT_XP_AWARD;
-
-        const newEvent = {
-          id: Date.now(),
-          title,
-          description,
-          startTime,
-          xp,
-          attendees: []
-        };
-        eventsData.list.push(newEvent);
-        saveJson(DATA_FILES.EVENTS_DATA, eventsData);
-
-        const eventEmbed = new EmbedBuilder()
-          .setTitle(`🎉 Event: ${title}`)
-          .setDescription(description)
-          .addFields(
-            { name: "Starts", value: `<t:${Math.floor(startTime / 1000)}:F>`, inline: true },
-            { name: "XP Reward", value: `${xp} XP`, inline: true }
-          )
-          .setColor("#e74c3c")
-          .setTimestamp();
-
-        const attendRow = new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setCustomId(`attend_event_${newEvent.id}`)
-            .setLabel("✅ Mark Attendance")
-            .setStyle(ButtonStyle.Success)
-        );
-
-        return interaction.reply({ embeds: [eventEmbed], components: [attendRow] });
       }
     }
 
@@ -1122,8 +1001,17 @@ client.on("interactionCreate", async (interaction) => {
         return interaction.reply({ content: `✅ Added ${amount} XP to ${target.username} — ${reason}` });
       }
       if (action === "remove") {
-        removeXp(target.id, amount, reason);
-        return interaction.reply({ content: `✅ Removed ${amount} XP from ${target.username} — ${reason}` });
+        removeXp(target.id, amount);
+        return interaction.reply({ content: `✅ Removed ${amount} XP from ${target.username}` });
+      }
+      if (action === "resetweekly") {
+        for (const user of Object.values(xpData.users)) {
+          user.weeklyXp = 0;
+          user.currentLevel = 1;
+        }
+        xpData.lastReset = Date.now();
+        saveJson(DATA_FILES.XP_DATA, xpData);
+        return interaction.reply({ content: "✅ Weekly XP reset complete." });
       }
     }
 
@@ -1135,179 +1023,212 @@ client.on("interactionCreate", async (interaction) => {
 
       if (action === "give") {
         if (giveScouterBadge(target.id, interaction.user.id, reason)) {
-          return interaction.reply({ content: `✅ Gave Scouter Badge to ${target.username}` });
-        }
-        return interaction.reply({ content: "❌ Failed to give badge." });
+          return interaction.reply({ content: `✅ Gave Scouter Badge to ${target
+                                                                         .username} — ${reason}` });
+        return interaction.reply({ content: `✅ Gave Scouter Badge to ${target.username} — ${reason}` });
       }
       if (action === "remove") {
         if (removeScouterBadge(target.id)) {
           return interaction.reply({ content: `✅ Removed Scouter Badge from ${target.username}` });
         }
-        return interaction.reply({ content: "❌ User does not have the Scouter Badge." });
+        return interaction.reply({ content: `❌ That user does not have a Scouter Badge.`, ephemeral: true });
+      }
+      if (action === "check") {
+        const hasBadge = hasScouterBadge(target.id);
+        return interaction.reply({
+          content: hasBadge 
+            ? `✅ ${target.username} **has** the Scouter Badge` 
+            : `❌ ${target.username} **does not have** the Scouter Badge`
+        });
       }
     }
 
-    // -------------------- ORIGINAL CHERBOT RAFFLE COMMANDS --------------------
+    // -------------------- Cherbot Raffle Commands --------------------
     if (name === "raffle") {
       const sub = interaction.options.getSubcommand();
-      const guildId = interaction.guildId;
-      const channelId = interaction.channelId;
-      const raffle = getRaffle(guildId, channelId);
-      const mainKey = raffleKey(guildId, channelId);
-      const isMini = Boolean(data.miniThreads?.[channelId]);
+      const channel = interaction.channel;
+      const guild = interaction.guild;
+      const member = interaction.member;
+      const mainKey = raffleKey(guild.id, channel.id);
+      const raffle = getRaffle(guild.id, channel.id);
 
       if (sub === "start") {
-        if (!canRunRaffles(interaction.member, interaction.channel)) {
+        if (!canRunRaffles(member, channel)) {
           return interaction.reply({ content: "❌ You cannot start raffles here.", ephemeral: true });
         }
         const max = interaction.options.getInteger("slots");
-        const priceText = interaction.options.getString("price") || "";
+        const priceText = interaction.options.getString("price") || "Free";
         const slotPrice = parseCoinPriceFromText(priceText);
 
-        raffle.max = max;
-        raffle.priceText = priceText;
-        raffle.slotPrice = slotPrice;
-        raffle.active = true;
-        raffle.claims = {};
-        raffle.fullNotified = false;
-        raffle.totalsPosted = false;
-        raffle.lastBoardMessageId = null;
-        raffle.hostId = interaction.user.id;
+        if (max < 1 || max > 200) {
+          return interaction.reply({ content: "❌ Slots must be between 1 and 200.", ephemeral: true });
+        }
+
+        Object.assign(raffle, {
+          active: true,
+          max,
+          priceText,
+          slotPrice,
+          claims: {},
+          totalsPosted: false,
+          lastBoardMessageId: null,
+          lastMainsLeftAnnounced: null,
+          lastAvailableAnnouncedClaimed: null,
+          hostId: interaction.user.id,
+          fullNotified: false,
+          endedAt: null
+        });
         saveData(data);
 
-        await postOrUpdateBoard(interaction.channel, raffle, mainKey);
-        return interaction.reply({ content: `✅ **Raffle started!** ${max} slots — ${priceText || "Free"}` });
+        await postOrUpdateBoard(channel, raffle, mainKey);
+        await safetyLog(guild, {
+          title: "🎟️ Raffle Started",
+          fields: [
+            { name: "Channel", value: `<#${channel.id}>`, inline: true },
+            { name: "Host", value: `<@${interaction.user.id}>`, inline: true },
+            { name: "Slots", value: `${max}`, inline: true },
+            { name: "Price", value: priceText, inline: true }
+          ],
+          color: 0x2ecc71
+        });
+        return interaction.reply({ content: `✅ Raffle started with **${max} slots** (${priceText})` });
       }
 
       if (sub === "claim") {
-        if (!raffle.active) return interaction.reply({ content: "❌ No active raffle here.", ephemeral: true });
-        const input = interaction.options.getString("numbers");
-        const nums = parseClaimNumbers(input);
-        if (!nums.length) return interaction.reply({ content: "❌ Provide slot numbers e.g. `1, 3-5, 7`", ephemeral: true });
-
-        const available = getAvailableNumbers(raffle);
-        const valid = nums.filter(n => available.includes(n));
-        if (!valid.length) return interaction.reply({ content: "❌ All requested slots are taken or invalid.", ephemeral: true });
-
-        for (const n of valid) {
-          if (!raffle.claims[String(n)]) raffle.claims[String(n)] = [];
-          if (!raffle.claims[String(n)].includes(interaction.user.id)) {
-            raffle.claims[String(n)].push(interaction.user.id);
-          }
+        if (!raffle.active) {
+          return interaction.reply({ content: "❌ No active raffle here.", ephemeral: true });
         }
+        if (isRaffleFull(raffle)) {
+          return interaction.reply({ content: "❌ Raffle is already full.", ephemeral: true });
+        }
+
+        const numbers = parseClaimNumbers(interaction.options.getString("numbers"));
+        if (!numbers.length) {
+          return interaction.reply({ content: "❌ Provide slot numbers (e.g. `1, 3-5, 7`).", ephemeral: true });
+        }
+
+        if (isRaffleLockedForUser(mainKey, interaction.user.id, isStaff)) {
+          return interaction.reply({ content: "⏳ Raffle is temporarily reserved — try again shortly.", ephemeral: true });
+        }
+
+        const mainRaffle = data.miniThreads[channel.id] ? null : raffle;
+        const valid = [];
+        const invalid = [];
+
+        for (const num of numbers) {
+          if (num < 1 || num > raffle.max) {
+            invalid.push(`${num} (out of range)`);
+            continue;
+          }
+          const owners = raffle.claims[String(num)] || [];
+          if (owners.length > 0) {
+            invalid.push(`${num} (taken)`);
+            continue;
+          }
+          valid.push(num);
+          raffle.claims[String(num)] = [interaction.user.id];
+        }
+
         saveData(data);
+        await postOrUpdateBoard(channel, raffle, mainKey);
+        await maybeAnnounceAvailable(channel, raffle);
+        if (isRaffleFull(raffle)) await handleFullRaffle(channel, raffle);
 
-        await postOrUpdateBoard(interaction.channel, raffle, mainKey);
-        await maybeAnnounceAvailable(interaction.channel, raffle);
-        if (isRaffleFull(raffle)) await handleFullRaffle(interaction.channel, raffle);
-
-        return interaction.reply({ content: `✅ Claimed slots: ${valid.join(", ")}` });
-      }
-
-      if (sub === "board") {
-        await postOrUpdateBoard(interaction.channel, raffle, mainKey);
-        return interaction.reply({ content: "✅ Board refreshed" });
+        const parts = [];
+        if (valid.length) parts.push(`✅ Claimed: **${valid.join(", ")}**`);
+        if (invalid.length) parts.push(`❌ Skipped: ${invalid.join(", ")}`);
+        return interaction.reply({ content: parts.join("\n"), ephemeral: true });
       }
 
       if (sub === "close") {
-        if (!canRunRaffles(interaction.member, interaction.channel)) {
-          return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+        if (!canRunRaffles(member, channel)) {
+          return interaction.reply({ content: "❌ Permission denied.", ephemeral: true });
         }
         raffle.active = false;
         saveData(data);
-        await postOrUpdateBoard(interaction.channel, raffle, mainKey);
-        return interaction.reply({ content: "✅ Raffle closed manually." });
+        await postOrUpdateBoard(channel, raffle, mainKey);
+        return interaction.reply({ content: "✅ Raffle closed — no more claims." });
+      }
+
+      if (sub === "board") {
+        return interaction.reply({ embeds: [formatBoardEmbed(raffle, mainKey)] });
       }
     }
 
     if (name === "roll") {
-      if (!interaction.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
-        return interaction.reply({ content: "❌ Only mods can run rolls.", ephemeral: true });
-      }
-      const guildId = interaction.guildId;
-      const channelId = interaction.channelId;
-      const raffle = getRaffle(guildId, channelId);
-      const mainKey = raffleKey(guildId, channelId);
-      const isMini = Boolean(data.miniThreads?.[channelId]);
+      if (!isStaff) return interaction.reply({ content: "❌ Permission denied.", ephemeral: true });
+      const channel = interaction.channel;
+      const raffle = getRaffle(interaction.guild.id, channel.id);
+      const isMini = Boolean(data.miniThreads[channel.id]);
 
       if (raffle.active && !isRaffleFull(raffle)) {
-        return interaction.reply({ content: "⚠️ Raffle is still open — use /raffle close first.", ephemeral: true });
+        return interaction.reply({ content: "❌ Raffle must be closed or full before rolling.", ephemeral: true });
       }
 
       const allSlots = Object.entries(raffle.claims || {})
-        .filter(([_, owners]) => Array.isArray(owners) && owners.length > 0);
-      if (!allSlots.length) return interaction.reply({ content: "❌ No slots claimed.", ephemeral: true });
+        .filter(([_, o]) => Array.isArray(o) && o.length)
+        .flatMap(([slot, owners]) => owners.map(owner => ({ slot: Number(slot), owner })));
 
-      const [winningSlot, owners] = allSlots[randInt(0, allSlots.length - 1)];
-      const winnerId = owners[randInt(0, owners.length - 1)];
+      if (!allSlots.length) {
+        return interaction.reply({ content: "❌ No claimed slots to roll.", ephemeral: true });
+      }
 
-      addXp(winnerId, 20, "Won raffle roll");
-      await logRoll(interaction, { winnerId, winningSlot, isMini });
+      const winner = allSlots[randInt(0, allSlots.length - 1)];
+      await logRoll(interaction, { winnerId: winner.owner, winningSlot: winner.slot, isMini });
 
       const embed = new EmbedBuilder()
-        .setTitle("🎲 WINNER!")
-        .setDescription(`**Slot #${winningSlot}** — <@${winnerId}>`)
-        .setColor("#f1c40f")
+        .setTitle(`🎲 ${isMini ? "Mini" : "Main"} Raffle Winner!`)
+        .setDescription(`**Slot #${winner.slot}** → <@${winner.owner}>`)
+        .setColor(0xf1c40f)
         .setTimestamp();
+
+      if (isMini) {
+        markMiniWinner(mainKey, winner.owner);
+        const tickets = interaction.options.getInteger("tickets") || 1;
+        const minutes = interaction.options.getInteger("minutes") || 10;
+        setMiniEntitlement(mainKey, winner.owner, tickets);
+        await pingMiniWinnerInMain(channel, winner.owner, winner.slot, tickets, minutes);
+        embed.addFields({ name: "🎟️ Reward", value: `${tickets} free claim(s) on main raffle` });
+      }
 
       return interaction.reply({ embeds: [embed] });
     }
 
-    if (name === "minis") {
-      if (!interaction.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
-        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-      }
-      const sub = interaction.options.getSubcommand();
-      const channelId = interaction.channelId;
-
-      if (sub === "setup") {
-        data.miniThreads[channelId] = { active: true, createdAt: Date.now() };
-        saveData(data);
-        return interaction.reply({ content: "✅ This thread is now marked as a Mini Raffle channel." });
-      }
-    }
-
-    // -------------------- MODAL HANDLERS --------------------
-    if (interaction.isModalSubmit()) {
-      if (interaction.customId === "suggest_modal") {
-        const title = interaction.fields.getTextInputValue("title");
-        const details = interaction.fields.getTextInputValue("details");
-        const dest = client.channels.cache.get(ASTRA_CONFIG.SUGGESTIONS_CHANNEL_ID);
-        if (!dest) return interaction.reply({ content: "❌ Suggestions channel not set.", ephemeral: true });
-
-        await dest.send({
-          embeds: [new EmbedBuilder()
-            .setTitle(`💡 Suggestion: ${title}`)
-            .setDescription(details)
-            .setFooter({ text: `Submitted by ${interaction.user.username} (${interaction.user.id})` })
-            .setColor("#3498db")
-            .setTimestamp()
-          ]
-        });
-        return interaction.reply({ content: "✅ Suggestion submitted!", ephemeral: true });
-      }
-    }
-
   } catch (err) {
     console.error("❌ Interaction error:", err?.stack || err);
-    if (!interaction.replied) interaction.reply({ content: "❌ An error occurred.", ephemeral: true }).catch(() => {});
+    if (interaction.replied || interaction.deferred) {
+      interaction.editReply({ content: "❌ Something went wrong running this command." }).catch(() => {});
+    } else {
+      interaction.reply({ content: "❌ Something went wrong.", ephemeral: true }).catch(() => {});
+    }
   }
 });
 
-// Weekly XP Reset (runs every Monday 00:00)
-setInterval(() => {
-  const now = new Date();
-  if (now.getDay() === 1 && now.getHours() === 0 && now.getMinutes() < 5) {
-    for (const user of Object.values(xpData.users)) {
-      user.weeklyXp = 0;
+// -------------------- Modal Handler --------------------
+client.on("modalSubmit", async (interaction) => {
+  if (interaction.customId === "suggest_modal") {
+    const title = interaction.fields.getTextInputValue("title");
+    const details = interaction.fields.getTextInputValue("details");
+    const channel = client.channels.cache.get(ASTRA_CONFIG.SUGGESTIONS_CHANNEL_ID);
+
+    if (channel) {
+      await channel.send({
+        embeds: [new EmbedBuilder()
+          .setTitle(`💡 Suggestion: ${title}`)
+          .setDescription(details)
+          .setAuthor({ name: interaction.user.username, iconURL: interaction.user.displayAvatarURL() })
+          .setColor("#3498db")
+          .setTimestamp()]
+      });
     }
-    xpData.lastReset = Date.now();
-    saveJson(DATA_FILES.XP_DATA, xpData);
-    console.log("✅ Weekly XP reset complete");
+    return interaction.reply({ content: "✅ Suggestion submitted — thank you!", ephemeral: true });
   }
-}, 5 * 60 * 1000);
+});
 
-// Login
-client.login(ASTRA_CONFIG.DISCORD_TOKEN);
+// -------------------- Error Handling --------------------
+client.on("error", err => console.error("❌ Client error:", err));
+client.on("warn", msg => console.warn("⚠️ Client warning:", msg));
 
-      return interaction.reply({ embeds: [new EmbedBuilder().setTitle(title).setDescription(list).setColor("#f1c40f")]
+// -------------------- Login --------------------
+client.login(ASTRA_CONFIG.DISCORD_TOKEN)
+  .catch(err => console.error("❌ Failed to login:", err.message));
