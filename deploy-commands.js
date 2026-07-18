@@ -1,230 +1,232 @@
-// deploy-commands.js — guild-only slash deploy (updates fast)
-const { REST, Routes, SlashCommandBuilder, PermissionFlagsBits } = require("discord.js");
+const { REST, Routes } = require("discord.js");
 const config = require("./config.json");
 
-const token = String(process.env.DISCORD_TOKEN || "").trim();
-if (!token) {
-  console.error("❌ No DISCORD_TOKEN env var found.");
-  process.exit(1);
-}
-
-const clientId = String(config.clientId || "").trim();
-const guildId = String(config.guildId || "").trim();
-if (!clientId || !guildId) {
-  console.error("❌ clientId or guildId missing in config.json");
-  process.exit(1);
-}
-
+// Define ALL slash commands
 const commands = [
-  new SlashCommandBuilder()
-    .setName("completedraffles")
-    .setDescription("List the most recent completed raffles (mods only)")
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+  // Astra / Core Commands
+  {
+    name: "whatsnew",
+    description: "Show latest bot updates and changes"
+  },
+  {
+    name: "levels",
+    description: "View XP requirements and level rewards"
+  },
+  {
+    name: "profile",
+    description: "View XP & level profile for a user",
+    options: [
+      {
+        type: 6,
+        name: "user",
+        description: "User to view profile for",
+        required: false
+      }
+    ]
+  },
+  {
+    name: "leaderboard",
+    description: "View XP leaderboard",
+    options: [
+      {
+        type: 3,
+        name: "type",
+        description: "Leaderboard type",
+        required: false,
+        choices: [
+          { name: "Weekly", value: "weekly" },
+          { name: "All-Time", value: "alltime" }
+        ]
+      }
+    ]
+  },
 
-  new SlashCommandBuilder()
-    .setName("giveaway")
-    .setDescription("Create a giveaway (mods only)")
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
-    .addStringOption((opt) => opt.setName("prize").setDescription("Prize").setRequired(true))
-    .addStringOption((opt) => opt.setName("duration").setDescription("10m, 2h, 1d").setRequired(true))
-    .addIntegerOption((opt) =>
-      opt.setName("winners").setDescription("Number of winners").setRequired(true).setMinValue(1).setMaxValue(50)
-    ),
+  // Trivia Commands
+  {
+    name: "trivia",
+    description: "Manage trivia games (Staff only)",
+    options: [
+      {
+        type: 3,
+        name: "action",
+        description: "Action to perform",
+        required: true,
+        choices: [
+          { name: "Add Theme", value: "addtheme" },
+          { name: "Add Question", value: "addquestion" },
+          { name: "Start", value: "start" },
+          { name: "Next Question", value: "next" },
+          { name: "End", value: "end" }
+        ]
+      },
+      {
+        type: 3,
+        name: "theme",
+        description: "Theme name",
+        required: true
+      },
+      {
+        type: 3,
+        name: "question",
+        description: "Question text",
+        required: false
+      },
+      {
+        type: 3,
+        name: "answer",
+        description: "Correct answer",
+        required: false
+      },
+      {
+        type: 4,
+        name: "xp",
+        description: "XP reward per correct answer",
+        required: false
+      }
+    ]
+  },
 
-  new SlashCommandBuilder()
-    .setName("roll")
-    .setDescription("Roll the winner for a FULL raffle (main or mini). Mods/host only."),
+  // XP Management
+  {
+    name: "xp",
+    description: "Manage user XP (Staff only)",
+    options: [
+      {
+        type: 3,
+        name: "action",
+        description: "Action to perform",
+        required: true,
+        choices: [
+          { name: "Add", value: "add" },
+          { name: "Remove", value: "remove" },
+          { name: "Reset Weekly", value: "resetweekly" }
+        ]
+      },
+      {
+        type: 6,
+        name: "user",
+        description: "Target user",
+        required: false
+      },
+      {
+        type: 4,
+        name: "amount",
+        description: "XP amount",
+        required: false
+      },
+      {
+        type: 3,
+        name: "reason",
+        description: "Reason for change",
+        required: false
+      }
+    ]
+  },
 
-  new SlashCommandBuilder()
-    .setName("raffle")
-    .setDescription("Raffle commands")
-    .addSubcommand((sub) =>
-      sub.setName("help").setDescription("Show raffle help & examples")
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("start")
-        .setDescription("Start a MAIN raffle in the current thread (mods/host only)")
-        .addIntegerOption((opt) =>
-          opt.setName("slots").setDescription("Total slots (1–500)").setRequired(true).setMinValue(1).setMaxValue(500)
-        )
-        .addStringOption((opt) =>
-          opt.setName("price").setDescription("Example: 50c (leave blank for FREE)").setRequired(false)
-        )
-        .addStringOption((opt) =>
-          opt.setName("duration").setDescription("Optional timer: 10m / 2h / 1d").setRequired(false)
-        )
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("mini")
-        .setDescription("Create a MINI for this main thread (mods/host only)")
-        .addIntegerOption((opt) =>
-          opt.setName("tickets").setDescription("Main tickets reserved (1–50)").setRequired(true).setMinValue(1).setMaxValue(50)
-        )
-        .addIntegerOption((opt) =>
-          opt.setName("mainslotprice").setDescription("Main ticket price in coins").setRequired(true).setMinValue(0).setMaxValue(1000000)
-        )
-        .addIntegerOption((opt) =>
-          opt.setName("minislots").setDescription("Mini slots (2–100). Default from config.").setRequired(false).setMinValue(2).setMaxValue(100)
-        )
-    )
-    .addSubcommand((sub) =>
-      sub.setName("minidraw").setDescription("Draw the mini winner (mods/host only) (use inside the mini thread)")
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("claim")
-        .setDescription("Claim specific slot numbers in this raffle")
-        .addStringOption((opt) =>
-          opt.setName("numbers").setDescription("Example: 5 12 27").setRequired(true)
-        )
-    )
-    .addSubcommand((sub) =>
-      sub.setName("rest").setDescription("Claim remaining available slots (up to your limit)")
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("remove")
-        .setDescription("Remove your slots, or remove a specific slot (mods only)")
-        .addIntegerOption((opt) =>
-          opt.setName("slot").setDescription("Slot number (mods only). Leave blank to remove your own.").setRequired(false).setMinValue(1)
-        )
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("split")
-        .setDescription("Split a PAID slot with another user (owner or mods)")
-        .addIntegerOption((opt) =>
-          opt.setName("slot").setDescription("Slot number").setRequired(true).setMinValue(1)
-        )
-        .addUserOption((opt) =>
-          opt.setName("user").setDescription("User to split with").setRequired(true)
-        )
-    ),
+  // Scouter Badges
+  {
+    name: "scouter",
+    description: "Manage Scouter Badges (Staff only)",
+    options: [
+      {
+        type: 3,
+        name: "action",
+        description: "Action to perform",
+        required: true,
+        choices: [
+          { name: "Give", value: "give" },
+          { name: "Remove", value: "remove" },
+          { name: "Check", value: "check" }
+        ]
+      },
+      {
+        type: 6,
+        name: "user",
+        description: "Target user",
+        required: true
+      },
+      {
+        type: 3,
+        name: "reason",
+        description: "Reason for giving/removing",
+        required: false
+      }
+    ]
+  },
 
-  // ── Murder Mystery ──
-  new SlashCommandBuilder()
-    .setName("mystery")
-    .setDescription("Murder mystery game")
-    .addSubcommand((sub) =>
-      sub.setName("start").setDescription("Start a new murder mystery game")
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("search")
-        .setDescription("Search a room for clues")
-        .addStringOption((opt) =>
-          opt
-            .setName("room")
-            .setDescription("Which room to search?")
-            .setRequired(true)
-            .addChoices(
-              { name: "Kitchen",       value: "Kitchen"       },
-              { name: "Dining Room",   value: "Dining Room"   },
-              { name: "Lounge",        value: "Lounge"        },
-              { name: "Hall",          value: "Hall"          },
-              { name: "Study",         value: "Study"         },
-              { name: "Library",       value: "Library"       },
-              { name: "Billiard Room", value: "Billiard Room" },
-              { name: "Conservatory",  value: "Conservatory"  },
-              { name: "Ballroom",      value: "Ballroom"      }
-            )
-        )
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("accuse")
-        .setDescription("Make your accusation to solve the case")
-        .addStringOption((opt) =>
-          opt
-            .setName("suspect")
-            .setDescription("Who did it?")
-            .setRequired(true)
-            .addChoices(
-              { name: "Miss Scarlett",   value: "Miss Scarlett"   },
-              { name: "Colonel Mustard", value: "Colonel Mustard" },
-              { name: "Mrs. White",      value: "Mrs. White"      },
-              { name: "Reverend Green",  value: "Reverend Green"  },
-              { name: "Mrs. Peacock",    value: "Mrs. Peacock"    },
-              { name: "Professor Plum",  value: "Professor Plum"  }
-            )
-        )
-        .addStringOption((opt) =>
-          opt
-            .setName("weapon")
-            .setDescription("What weapon?")
-            .setRequired(true)
-            .addChoices(
-              { name: "Revolver",     value: "Revolver"     },
-              { name: "Dagger",       value: "Dagger"       },
-              { name: "Lead Piping",  value: "Lead Piping"  },
-              { name: "Rope",         value: "Rope"         },
-              { name: "Spanner",      value: "Spanner"      },
-              { name: "Candlestick",  value: "Candlestick"  }
-            )
-        )
-        .addStringOption((opt) =>
-          opt
-            .setName("room")
-            .setDescription("In which room?")
-            .setRequired(true)
-            .addChoices(
-              { name: "Kitchen",       value: "Kitchen"       },
-              { name: "Dining Room",   value: "Dining Room"   },
-              { name: "Lounge",        value: "Lounge"        },
-              { name: "Hall",          value: "Hall"          },
-              { name: "Study",         value: "Study"         },
-              { name: "Library",       value: "Library"       },
-              { name: "Billiard Room", value: "Billiard Room" },
-              { name: "Conservatory",  value: "Conservatory"  },
-              { name: "Ballroom",      value: "Ballroom"      }
-            )
-        )
-    )
-    .addSubcommand((sub) =>
-      sub.setName("hint").setDescription("Get a hint (requires 3+ rooms searched)")
-    )
-    .addSubcommand((sub) =>
-      sub.setName("summary").setDescription("Review all clues discovered so far")
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("vote")
-        .setDescription("Vote for who you think the murderer is")
-        .addStringOption((opt) =>
-          opt
-            .setName("suspect")
-            .setDescription("Your vote")
-            .setRequired(true)
-            .addChoices(
-              { name: "Miss Scarlett",   value: "Miss Scarlett"   },
-              { name: "Colonel Mustard", value: "Colonel Mustard" },
-              { name: "Mrs. White",      value: "Mrs. White"      },
-              { name: "Reverend Green",  value: "Reverend Green"  },
-              { name: "Mrs. Peacock",    value: "Mrs. Peacock"    },
-              { name: "Professor Plum",  value: "Professor Plum"  }
-            )
-        )
-    )
-    .addSubcommand((sub) =>
-      sub.setName("tallyvotes").setDescription("Show the current vote tally")
-    )
-    .addSubcommand((sub) =>
-      sub.setName("toggleevents").setDescription("Toggle random atmospheric events on/off (mods only)")
-    ),
+  // Raffle Commands
+  {
+    name: "raffle",
+    description: "Manage channel raffles",
+    options: [
+      {
+        type: 3,
+        name: "subcommand",
+        description: "Action to perform",
+        required: true,
+        choices: [
+          { name: "Start", value: "start" },
+          { name: "Claim", value: "claim" },
+          { name: "Close", value: "close" },
+          { name: "Show Board", value: "board" }
+        ]
+      },
+      {
+        type: 4,
+        name: "slots",
+        description: "Number of slots (1-200)",
+        required: false
+      },
+      {
+        type: 3,
+        name: "price",
+        description: "Price per slot (e.g. 5c / Free)",
+        required: false
+      },
+      {
+        type: 3,
+        name: "numbers",
+        description: "Slot numbers to claim (e.g. 1, 3-5)",
+        required: false
+      }
+    ]
+  },
 
-].map((c) => c.toJSON());
+  // Roll Winner
+  {
+    name: "roll",
+    description: "Roll for a raffle winner (Staff only)",
+    options: [
+      {
+        type: 4,
+        name: "tickets",
+        description: "Free tickets for mini winner",
+        required: false
+      },
+      {
+        type: 4,
+        name: "minutes",
+        description: "Reservation time in minutes",
+        required: false
+      }
+    ]
+  }
+];
 
-const rest = new REST({ version: "10" }).setToken(token);
+// Deploy to guild (instant updates)
+const rest = new REST({ version: "10" }).setToken(config.token);
 
 (async () => {
   try {
-    console.log("🚀 Deploying slash commands to guild:", guildId);
-    await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: commands });
-    console.log("✅ Slash commands deployed successfully.");
-  } catch (err) {
-    console.error("❌ Failed to deploy commands:", err?.rawError || err?.message || err);
-    process.exit(1);
+    console.log("🔄 Started refreshing application (/) commands...");
+
+    await rest.put(
+      Routes.applicationGuildCommands(config.clientId, config.guildId),
+      { body: commands }
+    );
+
+    console.log(`✅ Successfully deployed ${commands.length} commands!`);
+  } catch (error) {
+    console.error("❌ Error deploying commands:", error);
   }
 })();
